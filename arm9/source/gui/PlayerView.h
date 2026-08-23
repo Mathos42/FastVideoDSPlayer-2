@@ -48,12 +48,19 @@ class PlayerView
     // consecutive characters are placed only CHAR_ADVANCE_W apart (tighter
     // than the sprite itself) to keep the text reasonably dense; this
     // relies on glyphs being left-aligned with blank space on their right
-    // within the 16px cell, which holds for all but the widest characters
+    // within the 16px cell, which holds for all but the widest characters.
+    //
+    // The sub-screen's sprite VRAM bank (VRAM_I) is only 16KB total, and at
+    // 128 bytes per 16x16 4bpp character cell that budget disappears fast
+    // once the fixed content (digits/circle/icons, ~5KB) is accounted for -
+    // MAX_LEGEND_CHARS/MAX_MSG_CHARS are sized to leave a comfortable
+    // safety margin under that limit (see RenderTextLine's hard cutoff for
+    // the case where they're still miscalculated).
     static const int CHAR_CELL_W = 16;
     static const int CHAR_CELL_H = 16;
     static const int CHAR_ADVANCE_W = 8;
-    static const int MAX_LEGEND_CHARS = 32; // per legend line
-    static const int MAX_MSG_CHARS = 28;    // per toast line
+    static const int MAX_LEGEND_CHARS = 24; // per legend line
+    static const int MAX_MSG_CHARS = 20;    // per toast line
 
     u16 _legendVramAfterFixed;              // VramManager checkpoint right after digits/circle/icons
     u16 _legendLine1TileAddr[MAX_LEGEND_CHARS];

@@ -36,12 +36,24 @@ static unsigned char DecodeNextChar(const char** text)
     return c;
 }
 
+// VRAM_I, mapped to the sub-screen's sprite (OBJ) memory by main.cpp
+// (vramSetBankI(VRAM_I_SUB_SPRITE)), is only 16KB in total. Writing sprite
+// tile data past that boundary silently corrupts whatever comes after
+// (which, on real hardware, showed up as garbled/missing digits) since
+// VramManager itself has no notion of the underlying bank's real size.
+static const int SUB_SPRITE_VRAM_SIZE = 16 * 1024;
+
 int PlayerView::RenderTextLine(const char* text, u16* tileAddr, int maxChars)
 {
     int n = 0;
     unsigned char c;
     while (n < maxChars && (c = DecodeNextChar(&text)) != 0)
     {
+        // hard safety net: never allocate past the physical VRAM bank,
+        // no matter what miscalculated the caller's char budget
+        if ((int)_subObj.GetState() + CHAR_CELL_W * CHAR_CELL_H / 2 > SUB_SPRITE_VRAM_SIZE)
+            break;
+
         char single[2] = { (char)c, 0 };
         memset(_textTmpBuf, 0, sizeof(_textTmpBuf));
         _robotoRegular10.CreateStringData(single, _textTmpBuf, CHAR_CELL_W);
@@ -180,8 +192,8 @@ void PlayerView::Initialize()
 
     // permanent button-legend text, rendered once and kept for the whole
     // playback session (unlike the toast messages below, it never expires)
-    _legendLine1Len = RenderTextLine("L/Y:PREC R/X:SUIV B:QUITTER", _legendLine1TileAddr, MAX_LEGEND_CHARS);
-    _legendLine2Len = RenderTextLine("START:BOUCLE  SELECT:ALEA", _legendLine2TileAddr, MAX_LEGEND_CHARS);
+    _legendLine1Len = RenderTextLine("L/Y:PREC R/X:SUIV", _legendLine1TileAddr, MAX_LEGEND_CHARS);
+    _legendLine2Len = RenderTextLine("B:QUIT  ST:BCL  SE:ALEA", _legendLine2TileAddr, MAX_LEGEND_CHARS);
 
     // everything allocated from here on is transient "toast" text: each
     // call to SetMessage() rewinds back to this point first, so it doesn't
