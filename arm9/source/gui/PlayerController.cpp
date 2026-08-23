@@ -276,4 +276,10 @@ PlayerController::NavAction PlayerController::Update()
 void PlayerController::ShowMessage(const char* line1, const char* line2)
 {
     _view.SetMessage(line1, line2);
+    // while playing, PlayerView::Update()/VBlank() are normally only
+    // called once a second (when the displayed second changes), to avoid
+    // needless redraws; force an immediate refresh here so the toast (and
+    // the time display drawn alongside it) doesn't wait for that next tick
+    _view.Update();
+    _view.VBlank();
 }
