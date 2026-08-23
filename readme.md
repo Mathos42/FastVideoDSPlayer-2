@@ -1,6 +1,6 @@
 FastVideoDSPlayer 2
 ===================
-Lecteur pour le format FastVideoDS. Sur votre carte SD avec TWiLight Menu++ d'installé, mettre le fichier FastVideoDS.nds dans "_nds\apps" puis lancez vos vidéos. Utilisez [FastVideoDS Encoder](https://github.com/Gericom/FastVideoDSEncoder) pour encoder vos vidéos.
+Lecteur pour le format FastVideoDS. Sur votre carte SD avec TWiLight Menu++ d'installé, mettre le fichier FastVideoDS.nds dans "_nds\apps" puis lancez vos vidéos. Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip) pour encoder vos vidéos.
 
 ## Caractéristiques
 - Prise en charge des vidéos longues
@@ -32,15 +32,15 @@ L'écran tactile permet de lancer ou de mettre en pause la vidéo, ainsi que de 
 
 --------------------------------------------------------------------------------------
 
-Pour encoder les vidéos utilisez FastVideoDSEncoder : https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip 
+Pour encoder les vidéos utilisez FastVideoDSEncoder : https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip  
 Fichiers .bat pour :  
-Encoder une ou plusieurs vidéos : https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.bat  
+Encoder une ou plusieurs vidéos : https://www.hiraven.com/FastVideoDS/FastVideoDS.bat  
 Encoder tout un répertoire de vidéos : https://www.hiraven.com/FastVideoDS/Encodage_repertoire.bat  
 
 --------------------------------------------------------------------------------------
 FastVideoDSPlayer 2
 ===================
-A player for the FastVideoDS format. On your SD card with TWiLight Menu++ installed, place the FastVideoDS.nds file in the ‘_nds\apps’ folder, then play your videos. Use [FastVideoDS Encoder](https://github.com/Gericom/FastVideoDSEncoder) to encode your videos.
+A player for the FastVideoDS format. On your SD card with TWiLight Menu++ installed, place the FastVideoDS.nds file in the ‘_nds\apps’ folder, then play your videos. Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip) to encode your videos.
 
 ## Features
 -    Support for long videos
@@ -75,7 +75,7 @@ The touchscreen allows you to play or pause the video, as well as navigate throu
 
 To encode videos, use FastVideoDSEncoder: https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip  
 .bat files for :  
-Encoding one or multiple videos : https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.bat  
+Encoding one or multiple videos : https://www.hiraven.com/FastVideoDS/FastVideoDS.bat  
 Encoding an entire folder of videos : https://www.hiraven.com/FastVideoDS/Encodage_repertoire.bat  
 
 --------------------------------------------------------------------------------------
