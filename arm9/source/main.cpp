@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "../../common/ipc.h"
 #include "FastVideo/fvDecoder.h"
 #include "FastVideo/fvMcData.h"
@@ -43,9 +44,19 @@ static void ShowVideoMessage()
 {
     if (!sPlayerController)
         return;
+
+    // strip the ".fv" extension for display (doesn't touch sCurPath itself,
+    // which still needs it to actually reload the file)
+    char displayName[64];
+    strncpy(displayName, GetFileName(sCurPath), sizeof(displayName) - 1);
+    displayName[sizeof(displayName) - 1] = 0;
+    size_t len = strlen(displayName);
+    if (len > 3 && strcasecmp(displayName + len - 3, ".fv") == 0)
+        displayName[len - 3] = 0;
+
     char line2[32];
     snprintf(line2, sizeof(line2), "BOUCLE:%s  ALEA:%s", sLoopEnabled ? "ON " : "OFF", sRandomEnabled ? "ON" : "OFF");
-    sPlayerController->ShowMessage(GetFileName(sCurPath), line2);
+    sPlayerController->ShowMessage(displayName, line2);
 }
 
 // Loads and starts the video at path. Destroys/replaces the current player
