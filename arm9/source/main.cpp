@@ -59,26 +59,6 @@ static void ShowVideoMessage()
     sPlayerController->ShowMessage(displayName, line2);
 }
 
-// Remplace les caractères interdits de FAT32 dans le nom du fichier par des underscores.
-// Ignore le préfixe du lecteur (fat:/ ou sd:/).
-static void sanitize_filename(char* path) {
-    const char* invalid_chars = "<>*:\"\\|?";
-    
-    // On trouve le dernier '/' pour ne nettoyer que le nom du fichier
-    char* filename_start = strrchr(path, '/');
-    if (filename_start) {
-        filename_start++; // On commence juste après le '/'
-    } else {
-        filename_start = path; // S'il n'y a pas de '/', on nettoie toute la chaîne
-    }
-
-    for (int i = 0; filename_start[i] != '\0'; i++) {
-        if (strchr(invalid_chars, filename_start[i]) != NULL) {
-            filename_start[i] = '_'; 
-        }
-    }
-}
-
 // Loads and starts the video at path. Destroys/replaces the current player
 // and controller as needed. Returns false if the video could not be loaded
 // (in which case there is no active player/controller anymore).
@@ -94,9 +74,6 @@ static bool loadAndStartVideo(const char* path)
 
     strncpy(sCurPath, path, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
-
-    // Nettoyage de la chaîne sCurPath pour éviter les crashs sur FAT32 (ex: ":" dans le nom)
-    sanitize_filename(sCurPath);
 
     if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
     {
