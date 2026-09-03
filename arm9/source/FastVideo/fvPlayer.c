@@ -375,11 +375,6 @@ ITCM_CODE void fv_updatePlayer(fv_player_t* player)
         const u16* dataBuf = fv_getPlayerDataBuffer(player, player->stage1Buffer);
         DC_FlushAll();
         // DC_InvalidateRange(dataBuf, player->frameDataSizes[player->stage1Buffer]);
-        
-        // Trace de debug : affiche la frame en cours de traitement
-        // int irq_dbg = enterCriticalSection();
-        // iprintf("Frame: %lu\n", player->curFrame);
-        // leaveCriticalSection(irq_dbg);
 
         int isPFrame = fv_frameIsP(dataBuf);
         if (isPFrame)
@@ -400,24 +395,6 @@ ITCM_CODE void fv_updatePlayer(fv_player_t* player)
             // DC_InvalidateRange((u16*)((u32)VRAM_A + 0x20000 * player->stage2VramBlock), 256 *
             // player->fvHeader->height * 2);
             DC_FlushAll();
-            while (sVBlankCount == 0 && REG_VCOUNT >= 192)
-                ;
-            fv_finishPBlock(&player->decoder, (u8*)VRAM_D, (u16*)((u32)VRAM_A + 0x20000 * player->stage2VramBlock));
-        }
-        else
-        {
-            fv_decodeFrame_asm(&player->decoder, player->stage2DataPtr,
-                               (u8*)((u32)VRAM_A + 0x20000 * player->stage2VramBlock));
-        }
-        nextStage3HasAudio = player->frameHasAudio[player->stage2Buffer];
-        int irq = enterCriticalSection();
-        {
-            player->freeDataBufferCount++;
-        }
-        leaveCriticalSection(irq);
-        if (player->isPlaying)
-            requestDataBuffer(player);
-        DC_FlushAll();
             while (sVBlankCount == 0 && REG_VCOUNT >= 192)
                 ;
             fv_finishPBlock(&player->decoder, (u8*)VRAM_D, (u16*)((u32)VRAM_A + 0x20000 * player->stage2VramBlock));
