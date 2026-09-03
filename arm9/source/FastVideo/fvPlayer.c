@@ -375,7 +375,6 @@ ITCM_CODE void fv_updatePlayer(fv_player_t* player)
         const u16* dataBuf = fv_getPlayerDataBuffer(player, player->stage1Buffer);
         DC_FlushAll();
         // DC_InvalidateRange(dataBuf, player->frameDataSizes[player->stage1Buffer]);
-
         int isPFrame = fv_frameIsP(dataBuf);
         if (isPFrame)
         {
