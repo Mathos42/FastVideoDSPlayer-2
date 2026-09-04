@@ -4,10 +4,22 @@
 #define DIM_WAIT_SEC 5
 #define DIM_FADE_SEC 3
 
+// minimum number of VBlanks required between two accepted L/R/X/Y/B/START/
+// SELECT presses: while playing, this controller's Update() spins in a
+// tight, unthrottled loop (unlike while paused), so it polls the physical
+// buttons far faster than usual - fast enough to catch a brief contact
+// bounce on aging hardware as if it were two separate presses. ~6 VBlanks
+// (~100ms) is comfortably longer than any real switch bounce, but far
+// shorter than a human could physically press the same button twice.
+#define NAV_DEBOUNCE_VBLANKS 6
+
+extern volatile u32 gVBlankCount;
+
 PlayerController::PlayerController(fv_player_t* player)
     : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
       _playing(true), _lastTime(-1), _seekPenDown(false), _playPausePenDown(false), _seekLastFrame(-1),
-      _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE)
+      _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE),
+      _lastNavActionVBlank(gVBlankCount - NAV_DEBOUNCE_VBLANKS)
 {
 }
 
@@ -103,29 +115,39 @@ void PlayerController::UpdateTouch()
 
 void PlayerController::UpdateKeys()
 {
-    if (_inputProvider.Triggered(KEY_B))
+    // debounce L/R/X/Y/B/START/SELECT only (see NAV_DEBOUNCE_VBLANKS comment
+    // above) - the D-pad/A keys below are unaffected, since seeking already
+    // relies on rapid, repeated triggers for its hold-to-continue behavior
+    bool navDebounced = (gVBlankCount - _lastNavActionVBlank) < NAV_DEBOUNCE_VBLANKS;
+
+    if (!navDebounced && _inputProvider.Triggered(KEY_B))
     {
         _pendingNavAction = NAV_ACTION_EXIT;
+        _lastNavActionVBlank = gVBlankCount;
         return;
     }
-    if (_inputProvider.Triggered(KEY_START))
+    if (!navDebounced && _inputProvider.Triggered(KEY_START))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_LOOP;
+        _lastNavActionVBlank = gVBlankCount;
         return;
     }
-    if (_inputProvider.Triggered(KEY_SELECT))
+    if (!navDebounced && _inputProvider.Triggered(KEY_SELECT))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_RANDOM;
+        _lastNavActionVBlank = gVBlankCount;
         return;
     }
-    if (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X))
+    if (!navDebounced && (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X)))
     {
         _pendingNavAction = NAV_ACTION_NEXT;
+        _lastNavActionVBlank = gVBlankCount;
         return;
     }
-    if (_inputProvider.Triggered(KEY_L) || _inputProvider.Triggered(KEY_Y))
+    if (!navDebounced && (_inputProvider.Triggered(KEY_L) || _inputProvider.Triggered(KEY_Y)))
     {
         _pendingNavAction = NAV_ACTION_PREV;
+        _lastNavActionVBlank = gVBlankCount;
         return;
     }
 

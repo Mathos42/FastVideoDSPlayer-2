@@ -51,6 +51,7 @@ private:
     PlayerView _view;
 
     NavAction _pendingNavAction;
+    u32 _lastNavActionVBlank; // for debouncing L/R/X/Y/B/START/SELECT (see UpdateKeys)
 
     void TogglePlayPause();
 
