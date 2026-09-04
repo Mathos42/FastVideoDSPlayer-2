@@ -18,6 +18,20 @@ static PlayerController* sPlayerController;
 
 extern u8 gDldiStub[];
 
+// free-running VBlank counter, used as a reliable timing reference for
+// input debouncing: while a video plays, PlayerController::Update() spins
+// in a tight, unthrottled loop (unlike while paused, which waits for
+// VBlank), so it can poll the physical buttons far faster than normal -
+// fast enough to catch a brief contact bounce on aging hardware as two
+// separate presses. VBlankCounter() gives PlayerController a time base
+// that doesn't depend on how fast that loop happens to be spinning.
+volatile u32 gVBlankCount = 0;
+
+static void vblankHandler()
+{
+    gVBlankCount++;
+}
+
 // scratch buffer used to receive the previous/next/random path found by the
 // arm7 (must be writable by the arm7 CPU, so plain main RAM, and cacheline
 // aligned so we can safely invalidate it)
@@ -122,6 +136,9 @@ int main(int argc, char** argv)
     DC_FlushAll();
 
     mpu_enableVramCache();
+
+    irqSet(IRQ_VBLANK, vblankHandler);
+    irqEnable(IRQ_VBLANK);
 
     bool canUseWram = false;
     if (isDSiMode() && twr_isUnlocked())
