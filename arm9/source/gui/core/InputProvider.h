@@ -87,6 +87,27 @@ class InputProvider
         _inputBufferWPtr = (_inputBufferWPtr + 1) & 3;
     }
 
+    /**
+     * \brief Syncs _currentKeys to whatever is physically held right now,
+     * without generating any Triggered()/Released() events for it.
+     *
+     * Needed because a new InputProvider always starts assuming nothing is
+     * held (_currentKeys = 0): if the physical user is still holding a
+     * button down from just before this provider was created (e.g. right
+     * after switching videos, if L/R/X/Y was held a little past the
+     * switch), the next Update() would otherwise see that already-held key
+     * transition from this provider's "0" to "pressed" and misreport it as
+     * a brand new press, on top of the one that caused the switch.
+     */
+    void PrimeCurrentState()
+    {
+        _currentKeys = SampleIntern();
+        _triggeredKeys = 0;
+        _releasedKeys = 0;
+        _inputBufferRPtr = 0;
+        _inputBufferWPtr = 0;
+    }
+
     void Reset()
     {
         _currentKeys = 0;
