@@ -27,6 +27,13 @@ void PlayerController::Initialize()
 {
     _view.Initialize();
 
+    // sync to whatever is physically held right now, so that a button the
+    // user is still holding from just before this controller was created
+    // (e.g. L/R/X/Y held a little past a video switch) doesn't get
+    // misdetected as a brand new press on the very first Update() - see
+    // InputProvider::PrimeCurrentState()
+    _inputProvider.PrimeCurrentState();
+
     _dimWaitFrames = DIM_WAIT_SEC * _player->fvHeader->fpsNum / _player->fvHeader->fpsDen;
     _dimFadeFrames = DIM_FADE_SEC * _player->fvHeader->fpsNum / _player->fvHeader->fpsDen;
     _invDimFadeFrames = 0x800000 / _dimFadeFrames;
