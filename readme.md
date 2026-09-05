@@ -4,9 +4,10 @@ Lecteur pour le format FastVideoDS.
 Sur votre carte SD avec TWiLight Menu++ d'installé, mettre le fichier FastVideoDS.nds dans "_nds\apps" puis lancez vos vidéos.  
 
 Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip) pour encoder vos vidéos. (https://github.com/Mathos42/FastVideoDSEncoder-2/)  
-- Encodeur mis à jour pour corriger des problèmes d'incompatibilité avec certains fichiers vidéos
-- Mis à Jour FFMpeg 9.0.1  
----
+- Plusieurs grosses corrections et mises à jour effectuées par rapport à la version originale  
+  (plus d'info sur mon github FastVideoDSEncoder-2)
+  
+  ---
 ## Caractéristiques
 - Prise en charge des vidéos longues
 - Lecture fluide grâce à l'ajustement de la fréquence de rafraîchissement de l'écran LCD à un multiple entier de la fréquence d'images
@@ -49,8 +50,9 @@ A player for the FastVideoDS format.
 On your SD card with TWiLight Menu++ installed, place the FastVideoDS.nds file in the ‘_nds\apps’ folder, then play your videos.  
 
 Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder.zip) to encode your videos. (https://github.com/Mathos42/FastVideoDSEncoder-2/)  
-- Encoder updated to fix compatibility issues with certain video files
-- Updated to FFmpeg 9.0.1  
+- Several major fixes and updates have been made compared to the original version  
+  (more information on my GitHub repository, FastVideoDSEncoder-2)
+  
 ---
 ## Features
 -    Support for long videos
