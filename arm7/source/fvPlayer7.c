@@ -488,6 +488,16 @@ static void handleFifo(u32 value)
             while (num * (vblankCount + 1) / den < 62)
                 vblankCount++;
 
+            // stop any fps adjustment left running by a previously opened
+            // video first: fpsa_start() below silently no-ops if a
+            // previous session was never properly stopped (sActiveFpsa
+            // still set), which went unnoticed as long as this player only
+            // ever opened one file per run, but now that videos can be
+            // switched at runtime this left every video after the first
+            // one that needed adjustment running with broken/stale timing
+            // (heard as audio glitches, since audio/video sync depends on it)
+            fpsa_stop(&sPlayer.fpsa);
+
             // safety
             if (num * vblankCount / den < 62)
             {
