@@ -18,6 +18,8 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Commandes vidéo : lecture/pause, vidéo suivante, précédente, lecture automatique de la vidéo suivante dans le répertoire et recherche par image clé
 - Désactive le rétroéclairage de l'écran inférieur pendant la lecture pour économiser de l'énergie
 - Prise en compte des lettres avec accents dans les noms de répertoires et de fichiers
+- Fonction boucle sur une vidéo et lecture aléatoire du répertoire
+- Mise à jour de la librtairie FatFS en R0.16  
 
 ## Contrôles
 ### Boutons
@@ -55,26 +57,28 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
   
 ---
 ## Features
--    Support for long videos
--    Smooth playback by adjusting the LCD refresh rate to an integer multiple of the frame rate
--    Supports up to 60 frames per second on the DSi (approximately 30 frames per second on the DS)
--    Uses the 3D engine for motion compensation
--    Loads data from the SD card and decodes audio on the ARM7 processor, whilst the ARM9 processor is fully available for video decoding
--    Support for Argv (for use with TWiLight Menu++, for example)
--    Video controls: play/pause, next video, previous video, auto-play next video in the folder and keyframe search
--    Disables the lower screen’s backlight during playback to save power
--    Handling accented letters in directory and file names
+- Support for long videos
+- Smooth playback by adjusting the LCD refresh rate to an integer multiple of the frame rate
+- Supports up to 60 frames per second on the DSi (approximately 30 frames per second on the DS)
+- Uses the 3D engine for motion compensation
+- Loads data from the SD card and decodes audio on the ARM7 processor, whilst the ARM9 processor is fully available for video decoding
+- Support for Argv (for use with TWiLight Menu++, for example)
+- Video controls: play/pause, next video, previous video, auto-play next video in the folder and keyframe search
+- Disables the lower screen’s backlight during playback to save power
+- Handling accented letters in directory and file names
+- Loop function for a video and random playback of the folder
+- FatFS library updated to R0.16
 
 ## Controls
 ### Buttons
--    A – Play/pause
--    Left D-pad – Skip to previous keyframe (hold down to continue)
--    Right D-pad – Skip to the next keyframe (hold down to continue)
--    L/Y – Previous video
--    R/X – Next video
--    B – Return to the video list
--    START - Turn track repeat on/off
--    SELECT - Turn shuffle on/off
+- A – Play/pause
+- Left D-pad – Skip to previous keyframe (hold down to continue)
+- Right D-pad – Skip to the next keyframe (hold down to continue)
+- L/Y – Previous video
+- R/X – Next video
+- B – Return to the video list
+- START - Turn track repeat on/off
+- SELECT - Turn shuffle on/off
 
 
 ### Touch
