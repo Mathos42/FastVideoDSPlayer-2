@@ -19,7 +19,7 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Désactive le rétroéclairage de l'écran inférieur pendant la lecture pour économiser de l'énergie
 - Prise en compte des lettres avec accents dans les noms de répertoires et de fichiers
 - Fonction boucle sur une vidéo et lecture aléatoire du répertoire
-- Mise à jour de la librtairie FatFS en R0.16  
+- Mise à jour de la librairie FatFS en R0.16  
 
 ## Contrôles
 ### Boutons
