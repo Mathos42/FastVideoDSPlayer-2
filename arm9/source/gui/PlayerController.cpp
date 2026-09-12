@@ -6,11 +6,12 @@
 
 // minimum number of VBlanks required between two accepted L/R/X/Y/B/START/
 // SELECT presses: while playing, this controller's Update() spins in a
-// tight, unthrottled loop (unlike while paused), so it polls the physical
-// buttons far faster than usual - fast enough to catch a brief contact
-// bounce on aging hardware as if it were two separate presses. ~6 VBlanks
-// (~100ms) is comfortably longer than any real switch bounce, but far
-// shorter than a human could physically press the same button twice.
+// tight, unthrottled loop (unlike while paused, which waits for
+// VBlank), so it can poll the physical buttons far faster than usual -
+// fast enough to catch a brief contact bounce on aging hardware as two
+// separate presses. ~6 VBlanks (~100ms) is comfortably longer than any
+// real switch bounce, but far shorter than a human could physically press
+// the same button twice.
 #define NAV_DEBOUNCE_VBLANKS 6
 
 extern volatile u32 gVBlankCount;
@@ -207,15 +208,22 @@ void PlayerController::UpdateDim()
         _subScreenStateCounter = 0;
     }
 
-    if (_subBacklightOff && _subScreenState != SUB_SCREEN_STATE_OFF)
+    // Sur DS Lite/Phat, il n'y a qu'un seul contrôle de rétroéclairage
+    // hardware qui affecte les DEUX écrans. powerOff(PM_BACKLIGHT_BOTTOM)
+    // éteindrait aussi l'écran du haut (celui de la vidéo).
+    // Sur DSi/3DS, les deux écrans sont contrôlés indépendamment.
+    if (isDSiMode())
     {
-        powerOn(PM_BACKLIGHT_BOTTOM);
-        _subBacklightOff = false;
-    }
-    else if (!_subBacklightOff && _subScreenState == SUB_SCREEN_STATE_OFF)
-    {
-        powerOff(PM_BACKLIGHT_BOTTOM);
-        _subBacklightOff = true;
+        if (_subBacklightOff && _subScreenState != SUB_SCREEN_STATE_OFF)
+        {
+            powerOn(PM_BACKLIGHT_BOTTOM);
+            _subBacklightOff = false;
+        }
+        else if (!_subBacklightOff && _subScreenState == SUB_SCREEN_STATE_OFF)
+        {
+            powerOff(PM_BACKLIGHT_BOTTOM);
+            _subBacklightOff = true;
+        }
     }
 
     switch (_subScreenState)
