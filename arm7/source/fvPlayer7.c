@@ -397,7 +397,7 @@ static bool findRandomFvFile(char* outPath)
     if (count == 0)
         return false; // no other .fv file found
 
-    u32 pick = hash32(gFrameCounter) % count;
+    u32 pick = gFrameCounter % count;
 
     // pass 2: walk again down to the picked index
     if (f_opendir(&dir, dirPath) != FR_OK)
