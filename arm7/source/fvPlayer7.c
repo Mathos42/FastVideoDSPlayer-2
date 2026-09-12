@@ -1,4 +1,4 @@
-#include <nds.h>
+#include <nds.h>#include <nds.h>
 #include <string.h>
 #include <strings.h>
 #include <nds/fifocommon.h>
@@ -170,47 +170,60 @@ static void gotoKeyFrameDirect(const fv_keyframe_t* keyFrameData)
     memset(&sPlayer.audioQueueR[0][0], 0, sizeof(sPlayer.audioQueueR));
 }
 
-static u32 gotoKeyFrame(u32 keyFrame)
+// Lit un keyframe par index directement depuis le fichier (1 seul f_lseek + 1 f_read)
+static void readKeyFrame(u32 index, fv_keyframe_t* out)
 {
     UINT br;
+    f_lseek(&sPlayer.file, sizeof(fv_header_t) + sizeof(fv_keyframe_t) * index);
+    f_read(&sPlayer.file, out, sizeof(fv_keyframe_t), &br);
+}
+
+// Version originale : O(1) accès SD au lieu de O(n) lectures séquentielles
+static u32 gotoKeyFrame(u32 keyFrame)
+{
     fv_keyframe_t keyFrameData;
 
-    f_lseek(&sPlayer.file, sizeof(fv_header_t) + sizeof(fv_keyframe_t) * keyFrame);
-    f_read(&sPlayer.file, &keyFrameData, sizeof(fv_keyframe_t), &br);
+    if (keyFrame >= sPlayer.nrKeyFrames)
+        keyFrame = sPlayer.nrKeyFrames - 1;
 
+    readKeyFrame(keyFrame, &keyFrameData);
     gotoKeyFrameDirect(&keyFrameData);
 
     return keyFrameData.frame;
 }
 
+// Recherche dichotomique : O(log n) accès SD au lieu de O(n) pour la
+// recherche linéaire originale de l'index des keyframes sur la carte SD
 static u32 gotoNearestKeyFrame(u32 frame, u32* resultFrame)
 {
-    UINT br;
-    fv_keyframe_t keyFrameData = { 0 };
-    fv_keyframe_t newKeyFrameData;
-    u32 keyFrameId = -1;
-
-    f_lseek(&sPlayer.file, sizeof(fv_header_t));
-
-    for (int i = 0; i < sPlayer.nrKeyFrames; i++)
-    {
-        f_read(&sPlayer.file, &newKeyFrameData, sizeof(fv_keyframe_t), &br);
-        if (newKeyFrameData.frame <= frame)
-        {
-            keyFrameData = newKeyFrameData;
-            keyFrameId = i;
-        }
-
-        if (newKeyFrameData.frame >= frame)
-            break;
+    if (sPlayer.nrKeyFrames == 0) {
+        if (resultFrame) *resultFrame = 0;
+        return 0;
     }
 
-    gotoKeyFrameDirect(&keyFrameData);
+    u32 lo = 0;
+    u32 hi = sPlayer.nrKeyFrames;
+    u32 best = 0;
+    fv_keyframe_t kf;
+
+    while (lo < hi) {
+        u32 mid = lo + (hi - lo) / 2;
+        readKeyFrame(mid, &kf);
+        if (kf.frame <= frame) {
+            best = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    readKeyFrame(best, &kf);
+    gotoKeyFrameDirect(&kf);
 
     if (resultFrame)
-        *resultFrame = keyFrameData.frame;
+        *resultFrame = kf.frame;
 
-    return keyFrameId;
+    return best;
 }
 
 // remembers the directory and file name of the currently open video so that
@@ -242,8 +255,6 @@ static bool hasFvExtension(const char* name)
     return len > 3 && strcasecmp(name + len - 3, ".fv") == 0;
 }
 
-// looks for the previous (direction < 0) or next (direction > 0) ".fv" file,
-// alphabetically (case-insensitive) and wrapping around, in the directory of
 // joins sPlayer.curDir + "/" + name into outPath (bounds-checked)
 static void joinCurDirAndName(const char* name, char* outPath)
 {
@@ -341,6 +352,25 @@ static bool findAdjacentFvFile(int direction, char* outPath)
 // the currently open video, without needing to store the full file list:
 // pass 1 counts eligible files, pass 2 walks again down to a randomly picked
 // index. On success writes the full path into outPath and returns true.
+// Chris Wellons' "lowbias32" integer hash: cheap but well-mixed 32-bit
+// avalanche. Used to turn gFrameCounter (which only advances by 1 each
+// VBlank) into something suitable for picking a random index: two calls
+// close together in time (as happens with quick repeated presses, or a
+// single debounced press) have very similar raw counter values, and
+// `gFrameCounter % count` alone tends to land on the same, or a cyclically
+// repeating, index for a small `count` - which "randomly" picking video 2
+// every single time makes very obvious. Hashing first spreads nearby
+// counter values across the whole 32-bit range before the modulo.
+static u32 hash32(u32 x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
+
 static bool findRandomFvFile(char* outPath)
 {
     DIR dir;
