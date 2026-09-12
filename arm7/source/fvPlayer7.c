@@ -329,6 +329,11 @@ static void buildShuffleBag(void)
     sPlayer.shuffleRemaining = sPlayer.shuffleCount;
     strncpy(sPlayer.shuffleDir, sPlayer.curDir, FV_MAX_PATH_LEN - 1);
     sPlayer.shuffleDir[FV_MAX_PATH_LEN - 1] = 0;
+    // Fige le nom exclu utilisé pour compter/indexer ci-dessus : curName va
+    // changer à chaque tirage suivant, mais l'énumération du dossier doit
+    // rester identique pendant toute la durée de vie de ce bag
+    strncpy(sPlayer.shuffleExcludedName, sPlayer.curName, FV_MAX_PATH_LEN - 1);
+    sPlayer.shuffleExcludedName[FV_MAX_PATH_LEN - 1] = 0;
 }
 
 // MODIFIÉ : Utilise le bag au lieu d'un tirage avec remise
@@ -359,7 +364,7 @@ static bool findRandomFvFile(char *outPath)
     while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
         if (info.fattrib & AM_DIR) continue;
         if (!hasFvExtension(info.fname)) continue;
-        if (strcasecmp(info.fname, sPlayer.curName) == 0) continue;
+        if (strcasecmp(info.fname, sPlayer.shuffleExcludedName) == 0) continue;
         
         if (currentIdx == targetIdx) {
             joinCurDirAndName(info.fname, outPath);

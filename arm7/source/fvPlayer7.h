@@ -38,6 +38,9 @@ typedef struct
     u16 shuffleCount;
     u16 shuffleRemaining;
     char shuffleDir[FV_MAX_PATH_LEN];
+    // nom exclu au moment du build du bag - figé pour toute la durée de vie
+    // du bag, ne doit PAS être relu depuis curName pendant les tirages
+    char shuffleExcludedName[FV_MAX_PATH_LEN];
 } fv_player7_t;
 
 void fv_init(void);
