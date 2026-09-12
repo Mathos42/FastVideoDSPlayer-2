@@ -19,9 +19,10 @@ extern volatile u32 gVBlankCount;
 PlayerController::PlayerController(fv_player_t* player)
     : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
       _playing(true), _lastTime(-1), _seekPenDown(false), _playPausePenDown(false), _seekLastFrame(-1),
-      _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE),
-      _lastNavActionVBlank(gVBlankCount - NAV_DEBOUNCE_VBLANKS)
+      _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE)
 {
+    for (int i = 0; i < NAV_DB_COUNT; i++)
+        _lastNavActionVBlank[i] = gVBlankCount - NAV_DEBOUNCE_VBLANKS;
 }
 
 void PlayerController::Initialize()
@@ -125,37 +126,44 @@ void PlayerController::UpdateKeys()
 {
     // debounce L/R/X/Y/B/START/SELECT only (see NAV_DEBOUNCE_VBLANKS comment
     // above) - the D-pad/A keys below are unaffected, since seeking already
-    // relies on rapid, repeated triggers for its hold-to-continue behavior
-    bool navDebounced = (gVBlankCount - _lastNavActionVBlank) < NAV_DEBOUNCE_VBLANKS;
+    // relies on rapid, repeated triggers for its hold-to-continue behavior.
+    // Each key/action has its OWN debounce slot (see NavDebounceSlot in the
+    // header): a shared single timestamp would let a press of one key (e.g.
+    // R to skip) silently eat a press of another (e.g. START) landing
+    // shortly after, since Triggered() only reflects a one-frame edge that
+    // is lost for good if not consumed on that frame.
+    auto debounced = [&](NavDebounceSlot slot) {
+        return (gVBlankCount - _lastNavActionVBlank[slot]) < NAV_DEBOUNCE_VBLANKS;
+    };
 
-    if (!navDebounced && _inputProvider.Triggered(KEY_B))
+    if (!debounced(NAV_DB_EXIT) && _inputProvider.Triggered(KEY_B))
     {
         _pendingNavAction = NAV_ACTION_EXIT;
-        _lastNavActionVBlank = gVBlankCount;
+        _lastNavActionVBlank[NAV_DB_EXIT] = gVBlankCount;
         return;
     }
-    if (!navDebounced && _inputProvider.Triggered(KEY_START))
+    if (!debounced(NAV_DB_TOGGLE_LOOP) && _inputProvider.Triggered(KEY_START))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_LOOP;
-        _lastNavActionVBlank = gVBlankCount;
+        _lastNavActionVBlank[NAV_DB_TOGGLE_LOOP] = gVBlankCount;
         return;
     }
-    if (!navDebounced && _inputProvider.Triggered(KEY_SELECT))
+    if (!debounced(NAV_DB_TOGGLE_RANDOM) && _inputProvider.Triggered(KEY_SELECT))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_RANDOM;
-        _lastNavActionVBlank = gVBlankCount;
+        _lastNavActionVBlank[NAV_DB_TOGGLE_RANDOM] = gVBlankCount;
         return;
     }
-    if (!navDebounced && (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X)))
+    if (!debounced(NAV_DB_NEXT) && (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X)))
     {
         _pendingNavAction = NAV_ACTION_NEXT;
-        _lastNavActionVBlank = gVBlankCount;
+        _lastNavActionVBlank[NAV_DB_NEXT] = gVBlankCount;
         return;
     }
-    if (!navDebounced && (_inputProvider.Triggered(KEY_L) || _inputProvider.Triggered(KEY_Y)))
+    if (!debounced(NAV_DB_PREV) && (_inputProvider.Triggered(KEY_L) || _inputProvider.Triggered(KEY_Y)))
     {
         _pendingNavAction = NAV_ACTION_PREV;
-        _lastNavActionVBlank = gVBlankCount;
+        _lastNavActionVBlank[NAV_DB_PREV] = gVBlankCount;
         return;
     }
 

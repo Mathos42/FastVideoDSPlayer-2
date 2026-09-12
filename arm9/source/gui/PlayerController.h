@@ -50,8 +50,21 @@ private:
 
     PlayerView _view;
 
+    // one independent debounce slot per nav key/action, so that pressing
+    // one (e.g. R to skip) can't swallow a press of another (e.g. START)
+    // landing shortly after - see UpdateKeys()
+    enum NavDebounceSlot
+    {
+        NAV_DB_EXIT,
+        NAV_DB_TOGGLE_LOOP,
+        NAV_DB_TOGGLE_RANDOM,
+        NAV_DB_NEXT,
+        NAV_DB_PREV,
+        NAV_DB_COUNT
+    };
+
     NavAction _pendingNavAction;
-    u32 _lastNavActionVBlank; // for debouncing L/R/X/Y/B/START/SELECT (see UpdateKeys)
+    u32 _lastNavActionVBlank[NAV_DB_COUNT]; // for debouncing L/R/X/Y/B/START/SELECT (see UpdateKeys)
 
     void TogglePlayPause();
 
