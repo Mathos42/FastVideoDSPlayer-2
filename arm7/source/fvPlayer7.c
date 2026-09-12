@@ -1,4 +1,4 @@
-#include <nds.h>#include <nds.h>
+#include <nds.h>
 #include <string.h>
 #include <strings.h>
 #include <nds/fifocommon.h>
@@ -11,24 +11,17 @@
 #include "fvPlayer7.h"
 
 #define FV_AUDIO_START_OFFSET 12
-
-#define FV_AUDIO_CH_LEFT  1
+#define FV_AUDIO_CH_LEFT 1
 #define FV_AUDIO_CH_RIGHT 3
 
 static fv_player7_t sPlayer;
+extern volatile u32 gFrameCounter; // défini dans main.c, incrémenté à chaque VBlank
 
-extern volatile u32 gFrameCounter; // defined in main.c, incremented every VBlank
-
-static void handleFindFile(u32 value, void* userdata);
+static void handleFindFile(u32 value, void *userdata);
 
 void fv_init(void)
 {
     memset(&sPlayer, 0, sizeof(sPlayer));
-    // dedicated channel for prev/next-video lookups: FIFO_USER_01 already
-    // has fv_initPlayer's frame-reading handler registered on the arm9
-    // side while a video is playing, so a synchronous wait on that same
-    // channel would never see our response (it gets routed straight to
-    // that handler instead of being queued)
     fifoSetValue32Handler(FIFO_USER_02, handleFindFile, NULL);
 }
 
@@ -47,17 +40,11 @@ static void decodeAudioFrame(void)
                      sPlayer.audioRingL[sPlayer.ringPos]);
     adpcm_decompress(sPlayer.audioQueueR[sPlayer.queueReadPtr], FV_AUDIO_FRAME_SIZE,
                      sPlayer.audioRingR[sPlayer.ringPos]);
-
-    // sPlayer.ringVideoFrameIds[sPlayer.ringPos] = sPlayer.queueVideoFrameIds[sPlayer.queueReadPtr];
-
     if (++sPlayer.ringPos == FV_AUDIO_RING_FRAMES)
         sPlayer.ringPos = 0;
-
     if (++sPlayer.queueReadPtr == FV_AUDIO_QUEUE_FRAMES)
         sPlayer.queueReadPtr = 0;
-
     sPlayer.queueFrameCount--;
-
     sPlayer.audioFramesNeeded--;
     sPlayer.audioFramesProvided++;
 }
@@ -66,54 +53,40 @@ static void startAudio(void)
 {
     if (sPlayer.audioStarted)
         return;
-
     sPlayer.ringPos = 0;
     sPlayer.audioFramesNeeded = 0;
     sPlayer.audioFramesProvided = 0;
-
-    for (int i = 0; i < FV_AUDIO_START_OFFSET; i++)
-    {
+    for (int i = 0; i < FV_AUDIO_START_OFFSET; i++) {
         if (sPlayer.queueFrameCount == 0)
             break;
         decodeAudioFrame();
     }
-
     sPlayer.audioFramesProvided -= FV_AUDIO_START_OFFSET;
-
     int tmr = getAudioTimerValue(FV_AUDIO_RATE);
     SCHANNEL_SOURCE(FV_AUDIO_CH_LEFT) = (u32)sPlayer.audioRingL;
     SCHANNEL_REPEAT_POINT(FV_AUDIO_CH_LEFT) = 0;
     SCHANNEL_LENGTH(FV_AUDIO_CH_LEFT) = sizeof(sPlayer.audioRingL) >> 2;
     SCHANNEL_TIMER(FV_AUDIO_CH_LEFT) = -tmr;
-
     SCHANNEL_SOURCE(FV_AUDIO_CH_RIGHT) = (u32)sPlayer.audioRingR;
     SCHANNEL_REPEAT_POINT(FV_AUDIO_CH_RIGHT) = 0;
     SCHANNEL_LENGTH(FV_AUDIO_CH_RIGHT) = sizeof(sPlayer.audioRingR) >> 2;
     SCHANNEL_TIMER(FV_AUDIO_CH_RIGHT) = -tmr;
-
     TIMER_CR(0) = 0;
     TIMER_CR(1) = 0;
     TIMER_CR(2) = 0;
     TIMER_CR(3) = 0;
-
-    TIMER_DATA(0) = -2;   // 1/2 clock divider
-    TIMER_DATA(1) = -tmr; // sample rate
-    TIMER_DATA(2) = -256; // length of audio frame
-    TIMER_DATA(3) = 0;    // audio block counter
-
+    TIMER_DATA(0) = -2;
+    TIMER_DATA(1) = -tmr;
+    TIMER_DATA(2) = -256;
+    TIMER_DATA(3) = 0;
     TIMER_CR(3) = TIMER_CASCADE | TIMER_ENABLE;
     TIMER_CR(2) = TIMER_CASCADE | TIMER_ENABLE | TIMER_IRQ_REQ;
     TIMER_CR(1) = TIMER_CASCADE | TIMER_ENABLE;
-
     irqSet(IRQ_TIMER2, audioFrameIrq);
     irqEnable(IRQ_TIMER2);
-
-    SCHANNEL_CR(FV_AUDIO_CH_LEFT) =
-        SCHANNEL_ENABLE | SOUND_VOL(0x7F) | SOUND_PAN(0) | SOUND_FORMAT_16BIT | SOUND_REPEAT;
-    SCHANNEL_CR(FV_AUDIO_CH_RIGHT) =
-        SCHANNEL_ENABLE | SOUND_VOL(0x7F) | SOUND_PAN(0x7F) | SOUND_FORMAT_16BIT | SOUND_REPEAT;
+    SCHANNEL_CR(FV_AUDIO_CH_LEFT) = SCHANNEL_ENABLE | SOUND_VOL(0x7F) | SOUND_PAN(0) | SOUND_FORMAT_16BIT | SOUND_REPEAT;
+    SCHANNEL_CR(FV_AUDIO_CH_RIGHT) = SCHANNEL_ENABLE | SOUND_VOL(0x7F) | SOUND_PAN(0x7F) | SOUND_FORMAT_16BIT | SOUND_REPEAT;
     TIMER_CR(0) = TIMER_ENABLE;
-
     sPlayer.audioStarted = true;
 }
 
@@ -121,7 +94,6 @@ static void stopAudio(void)
 {
     if (!sPlayer.audioStarted)
         return;
-
     sPlayer.audioStarted = false;
     TIMER_CR(0) = 0;
     irqDisable(IRQ_TIMER2);
@@ -139,73 +111,57 @@ static void updateAudio(void)
 {
     if (!sPlayer.audioStarted)
         return;
-
     int audioBlocks = TIMER_DATA(3);
     int needed = audioBlocks - (sPlayer.audioFramesProvided & 0xFFFF);
     if (needed < 0)
         needed += 65536;
-
-    while (needed > 0 && sPlayer.queueFrameCount > 0)
-    {
+    while (needed > 0 && sPlayer.queueFrameCount > 0) {
         decodeAudioFrame();
         needed--;
     }
 }
 
-static void gotoKeyFrameDirect(const fv_keyframe_t* keyFrameData)
+static void gotoKeyFrameDirect(const fv_keyframe_t *keyFrameData)
 {
     f_lseek(&sPlayer.file, keyFrameData->offset);
-
-    // reset player state
     stopAudio();
-
     sPlayer.ringPos = 0;
     sPlayer.queueReadPtr = 0;
     sPlayer.queueWritePtr = 0;
     sPlayer.queueFrameCount = 0;
     sPlayer.audioFramesNeeded = 0;
     sPlayer.audioFramesProvided = 0;
-
     memset(&sPlayer.audioQueueL[0][0], 0, sizeof(sPlayer.audioQueueL));
     memset(&sPlayer.audioQueueR[0][0], 0, sizeof(sPlayer.audioQueueR));
 }
 
-// Lit un keyframe par index directement depuis le fichier (1 seul f_lseek + 1 f_read)
-static void readKeyFrame(u32 index, fv_keyframe_t* out)
+static void readKeyFrame(u32 index, fv_keyframe_t *out)
 {
     UINT br;
     f_lseek(&sPlayer.file, sizeof(fv_header_t) + sizeof(fv_keyframe_t) * index);
     f_read(&sPlayer.file, out, sizeof(fv_keyframe_t), &br);
 }
 
-// Version originale : O(1) accès SD au lieu de O(n) lectures séquentielles
 static u32 gotoKeyFrame(u32 keyFrame)
 {
     fv_keyframe_t keyFrameData;
-
     if (keyFrame >= sPlayer.nrKeyFrames)
         keyFrame = sPlayer.nrKeyFrames - 1;
-
     readKeyFrame(keyFrame, &keyFrameData);
     gotoKeyFrameDirect(&keyFrameData);
-
     return keyFrameData.frame;
 }
 
-// Recherche dichotomique : O(log n) accès SD au lieu de O(n) pour la
-// recherche linéaire originale de l'index des keyframes sur la carte SD
-static u32 gotoNearestKeyFrame(u32 frame, u32* resultFrame)
+static u32 gotoNearestKeyFrame(u32 frame, u32 *resultFrame)
 {
     if (sPlayer.nrKeyFrames == 0) {
         if (resultFrame) *resultFrame = 0;
         return 0;
     }
-
     u32 lo = 0;
     u32 hi = sPlayer.nrKeyFrames;
     u32 best = 0;
     fv_keyframe_t kf;
-
     while (lo < hi) {
         u32 mid = lo + (hi - lo) / 2;
         readKeyFrame(mid, &kf);
@@ -216,23 +172,17 @@ static u32 gotoNearestKeyFrame(u32 frame, u32* resultFrame)
             hi = mid;
         }
     }
-
     readKeyFrame(best, &kf);
     gotoKeyFrameDirect(&kf);
-
     if (resultFrame)
         *resultFrame = kf.frame;
-
     return best;
 }
 
-// remembers the directory and file name of the currently open video so that
-// findAdjacentFvFile() can later look up its previous/next sibling
-static void rememberCurPath(const char* path)
+static void rememberCurPath(const char *path)
 {
-    const char* lastSlash = strrchr(path, '/');
-    if (lastSlash)
-    {
+    const char *lastSlash = strrchr(path, '/');
+    if (lastSlash) {
         int dirLen = lastSlash - path;
         if (dirLen >= (int)sizeof(sPlayer.curDir))
             dirLen = sizeof(sPlayer.curDir) - 1;
@@ -240,127 +190,88 @@ static void rememberCurPath(const char* path)
         sPlayer.curDir[dirLen] = 0;
         strncpy(sPlayer.curName, lastSlash + 1, sizeof(sPlayer.curName) - 1);
         sPlayer.curName[sizeof(sPlayer.curName) - 1] = 0;
-    }
-    else
-    {
+    } else {
         sPlayer.curDir[0] = 0;
         strncpy(sPlayer.curName, path, sizeof(sPlayer.curName) - 1);
         sPlayer.curName[sizeof(sPlayer.curName) - 1] = 0;
     }
 }
 
-static bool hasFvExtension(const char* name)
+static bool hasFvExtension(const char *name)
 {
     int len = strlen(name);
     return len > 3 && strcasecmp(name + len - 3, ".fv") == 0;
 }
 
-// joins sPlayer.curDir + "/" + name into outPath (bounds-checked)
-static void joinCurDirAndName(const char* name, char* outPath)
+static void joinCurDirAndName(const char *name, char *outPath)
 {
-    if (sPlayer.curDir[0])
-    {
+    if (sPlayer.curDir[0]) {
         size_t dirLen = strlen(sPlayer.curDir);
         if (dirLen > FV_MAX_PATH_LEN - 2)
-            dirLen = FV_MAX_PATH_LEN - 2; // guard against a (very) long directory path
+            dirLen = FV_MAX_PATH_LEN - 2;
         memcpy(outPath, sPlayer.curDir, dirLen);
         outPath[dirLen] = '/';
-        size_t avail = FV_MAX_PATH_LEN - dirLen - 2; // space left for name + null terminator
+        size_t avail = FV_MAX_PATH_LEN - dirLen - 2;
         size_t nameLen = strlen(name);
         if (nameLen > avail)
             nameLen = avail;
         memcpy(outPath + dirLen + 1, name, nameLen);
         outPath[dirLen + 1 + nameLen] = 0;
-    }
-    else
-    {
+    } else {
         strncpy(outPath, name, FV_MAX_PATH_LEN - 1);
         outPath[FV_MAX_PATH_LEN - 1] = 0;
     }
 }
 
-// looks for the previous (direction < 0) or next (direction > 0) ".fv" file,
-// alphabetically (case-insensitive) and wrapping around, in the directory of
-// the currently open video. On success writes the full path of the found
-// file into outPath (must be at least FV_MAX_PATH_LEN bytes) and returns true
-static bool findAdjacentFvFile(int direction, char* outPath)
+static bool findAdjacentFvFile(int direction, char *outPath)
 {
     DIR dir;
     FILINFO info;
     static char best[FV_MAX_PATH_LEN];
-    static char edge[FV_MAX_PATH_LEN]; // smallest/largest overall, for wraparound
+    static char edge[FV_MAX_PATH_LEN];
     bool haveBest = false;
     bool haveEdge = false;
-
-    const char* dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
-
+    const char *dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
     if (f_opendir(&dir, dirPath) != FR_OK)
         return false;
-
-    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0)
-    {
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
         if (info.fattrib & AM_DIR)
             continue;
         if (!hasFvExtension(info.fname))
             continue;
-
         int cmpToCur = strcasecmp(info.fname, sPlayer.curName);
-
-        if (direction > 0)
-        {
-            if (cmpToCur > 0 && (!haveBest || strcasecmp(info.fname, best) < 0))
-            {
+        if (direction > 0) {
+            if (cmpToCur > 0 && (!haveBest || strcasecmp(info.fname, best) < 0)) {
                 strncpy(best, info.fname, sizeof(best) - 1);
                 best[sizeof(best) - 1] = 0;
                 haveBest = true;
             }
-            if (!haveEdge || strcasecmp(info.fname, edge) < 0)
-            {
+            if (!haveEdge || strcasecmp(info.fname, edge) < 0) {
                 strncpy(edge, info.fname, sizeof(edge) - 1);
                 edge[sizeof(edge) - 1] = 0;
                 haveEdge = true;
             }
-        }
-        else
-        {
-            if (cmpToCur < 0 && (!haveBest || strcasecmp(info.fname, best) > 0))
-            {
+        } else {
+            if (cmpToCur < 0 && (!haveBest || strcasecmp(info.fname, best) > 0)) {
                 strncpy(best, info.fname, sizeof(best) - 1);
                 best[sizeof(best) - 1] = 0;
                 haveBest = true;
             }
-            if (!haveEdge || strcasecmp(info.fname, edge) > 0)
-            {
+            if (!haveEdge || strcasecmp(info.fname, edge) > 0) {
                 strncpy(edge, info.fname, sizeof(edge) - 1);
                 edge[sizeof(edge) - 1] = 0;
                 haveEdge = true;
             }
         }
     }
-
     f_closedir(&dir);
-
-    const char* chosen = haveBest ? best : (haveEdge ? edge : NULL);
+    const char *chosen = haveBest ? best : (haveEdge ? edge : NULL);
     if (!chosen || strcasecmp(chosen, sPlayer.curName) == 0)
-        return false; // no other .fv file found
-
+        return false;
     joinCurDirAndName(chosen, outPath);
     return true;
 }
 
-// picks a random ".fv" file (other than the current one) in the directory of
-// the currently open video, without needing to store the full file list:
-// pass 1 counts eligible files, pass 2 walks again down to a randomly picked
-// index. On success writes the full path into outPath and returns true.
-// Chris Wellons' "lowbias32" integer hash: cheap but well-mixed 32-bit
-// avalanche. Used to turn gFrameCounter (which only advances by 1 each
-// VBlank) into something suitable for picking a random index: two calls
-// close together in time (as happens with quick repeated presses, or a
-// single debounced press) have very similar raw counter values, and
-// `gFrameCounter % count` alone tends to land on the same, or a cyclically
-// repeating, index for a small `count` - which "randomly" picking video 2
-// every single time makes very obvious. Hashing first spreads nearby
-// counter values across the whole 32-bit range before the modulo.
 static u32 hash32(u32 x)
 {
     x ^= x >> 16;
@@ -371,82 +282,114 @@ static u32 hash32(u32 x)
     return x;
 }
 
-static bool findRandomFvFile(char* outPath)
+// NOUVEAU : Construit le "bag" d'indices mélangés
+static void buildShuffleBag(void)
 {
     DIR dir;
     FILINFO info;
-
-    const char* dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
-
-    // pass 1: count eligible files (excluding the current one)
-    if (f_opendir(&dir, dirPath) != FR_OK)
-        return false;
+    const char *dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
+    
+    // Passage 1 : compter les fichiers éligibles (hors vidéo en cours)
+    if (f_opendir(&dir, dirPath) != FR_OK) {
+        sPlayer.shuffleRemaining = 0;
+        return;
+    }
+    
     u32 count = 0;
-    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0)
-    {
-        if (info.fattrib & AM_DIR)
-            continue;
-        if (!hasFvExtension(info.fname))
-            continue;
-        if (strcasecmp(info.fname, sPlayer.curName) == 0)
-            continue;
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
+        if (info.fattrib & AM_DIR) continue;
+        if (!hasFvExtension(info.fname)) continue;
+        // EXCLUSION CRITIQUE : empêche la dernière vidéo lue d'être dans le nouveau bag
+        if (strcasecmp(info.fname, sPlayer.curName) == 0) continue;
         count++;
     }
     f_closedir(&dir);
+    
+    if (count == 0) {
+        sPlayer.shuffleCount = 0;
+        sPlayer.shuffleRemaining = 0;
+        return;
+    }
+    
+    sPlayer.shuffleCount = (count > MAX_SHUFFLE_FILES) ? MAX_SHUFFLE_FILES : (u16)count;
+    
+    // Passage 2 : initialiser les indices et mélanger (Fisher-Yates)
+    for (u16 i = 0; i < sPlayer.shuffleCount; i++) {
+        sPlayer.shuffleIndices[i] = i;
+    }
+    
+    for (u16 i = sPlayer.shuffleCount - 1; i > 0; i--) {
+        u32 seed = hash32(gFrameCounter + i + sPlayer.shuffleCount);
+        u16 j = seed % (i + 1);
+        u16 temp = sPlayer.shuffleIndices[i];
+        sPlayer.shuffleIndices[i] = sPlayer.shuffleIndices[j];
+        sPlayer.shuffleIndices[j] = temp;
+    }
+    
+    sPlayer.shuffleRemaining = sPlayer.shuffleCount;
+    strncpy(sPlayer.shuffleDir, sPlayer.curDir, FV_MAX_PATH_LEN - 1);
+    sPlayer.shuffleDir[FV_MAX_PATH_LEN - 1] = 0;
+}
 
-    if (count == 0)
-        return false; // no other .fv file found
-
-    u32 pick = gFrameCounter % count;
-
-    // pass 2: walk again down to the picked index
-    if (f_opendir(&dir, dirPath) != FR_OK)
+// MODIFIÉ : Utilise le bag au lieu d'un tirage avec remise
+static bool findRandomFvFile(char *outPath)
+{
+    // Reconstruire le bag si le dossier a changé ou s'il est épuisé
+    if (sPlayer.shuffleRemaining == 0 || strcmp(sPlayer.shuffleDir, sPlayer.curDir) != 0) {
+        buildShuffleBag();
+    }
+    
+    if (sPlayer.shuffleRemaining == 0) {
         return false;
+    }
+    
+    // Piocher l'indice cible dans le bag mélangé (de la fin vers le début)
+    u16 targetIdx = sPlayer.shuffleIndices[sPlayer.shuffleRemaining - 1];
+    sPlayer.shuffleRemaining--;
+    
+    // Passage 3 : retrouver le fichier correspondant à l'indice cible
+    DIR dir;
+    FILINFO info;
+    const char *dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
+    
+    if (f_opendir(&dir, dirPath) != FR_OK) return false;
+    
     bool found = false;
-    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0)
-    {
-        if (info.fattrib & AM_DIR)
-            continue;
-        if (!hasFvExtension(info.fname))
-            continue;
-        if (strcasecmp(info.fname, sPlayer.curName) == 0)
-            continue;
-        if (pick == 0)
-        {
+    u16 currentIdx = 0;
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
+        if (info.fattrib & AM_DIR) continue;
+        if (!hasFvExtension(info.fname)) continue;
+        if (strcasecmp(info.fname, sPlayer.curName) == 0) continue;
+        
+        if (currentIdx == targetIdx) {
             joinCurDirAndName(info.fname, outPath);
             found = true;
             break;
         }
-        pick--;
+        currentIdx++;
     }
     f_closedir(&dir);
-
+    
     return found;
 }
 
-static void handleFindFile(u32 value, void* userdata)
+static void handleFindFile(u32 value, void *userdata)
 {
-    switch (value >> IPC_CMD_CMD_SHIFT)
-    {
-        case IPC_CMD_FIND_NEXT_FILE:
-        {
-            char* outPath = (char*)(value & IPC_CMD_ARG_MASK);
+    switch (value >> IPC_CMD_CMD_SHIFT) {
+        case IPC_CMD_FIND_NEXT_FILE: {
+            char *outPath = (char *)(value & IPC_CMD_ARG_MASK);
             bool found = findAdjacentFvFile(1, outPath);
             fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_NEXT_FILE, found ? 1 : 0));
             break;
         }
-
-        case IPC_CMD_FIND_PREV_FILE:
-        {
-            char* outPath = (char*)(value & IPC_CMD_ARG_MASK);
+        case IPC_CMD_FIND_PREV_FILE: {
+            char *outPath = (char *)(value & IPC_CMD_ARG_MASK);
             bool found = findAdjacentFvFile(-1, outPath);
             fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_PREV_FILE, found ? 1 : 0));
             break;
         }
-
-        case IPC_CMD_FIND_RANDOM_FILE:
-        {
-            char* outPath = (char*)(value & IPC_CMD_ARG_MASK);
+        case IPC_CMD_FIND_RANDOM_FILE: {
+            char *outPath = (char *)(value & IPC_CMD_ARG_MASK);
             bool found = findRandomFvFile(outPath);
             fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE, found ? 1 : 0));
             break;
@@ -457,100 +400,63 @@ static void handleFindFile(u32 value, void* userdata)
 static void handleFifo(u32 value)
 {
     UINT br;
-
-    switch (value >> IPC_CMD_CMD_SHIFT)
-    {
-        case IPC_CMD_READ_FRAME:
-        {
+    switch (value >> IPC_CMD_CMD_SHIFT) {
+        case IPC_CMD_READ_FRAME: {
             u32 len;
-            if (f_read(&sPlayer.file, &len, 4, &br) != FR_OK || br != 4)
-            {
+            if (f_read(&sPlayer.file, &len, 4, &br) != FR_OK || br != 4) {
                 fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_READ_FRAME, 0));
                 break;
             }
-            f_read(&sPlayer.file, (void*)(value & IPC_CMD_ARG_MASK), len & 0x1FFFF, &br);
+            f_read(&sPlayer.file, (void *)(value & IPC_CMD_ARG_MASK), len & 0x1FFFF, &br);
             fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_READ_FRAME, len & 0x1FFFF));
-            // read audio frames
             u32 audioFrames = len >> 17;
-            for (int i = 0; i < audioFrames; i++)
-            {
+            for (int i = 0; i < audioFrames; i++) {
                 f_read(&sPlayer.file, sPlayer.audioQueueL[sPlayer.queueWritePtr], FV_AUDIO_FRAME_SIZE, &br);
                 f_read(&sPlayer.file, sPlayer.audioQueueR[sPlayer.queueWritePtr], FV_AUDIO_FRAME_SIZE, &br);
-                // sPlayer.queueVideoFrameIds[sPlayer.queueWritePtr] = sPlayer.curVideoFrame;
                 if (++sPlayer.queueWritePtr == FV_AUDIO_QUEUE_FRAMES)
                     sPlayer.queueWritePtr = 0;
-
                 sPlayer.queueFrameCount++;
             }
-
-            // sPlayer.curVideoFrame++;
             break;
         }
-
-        case IPC_CMD_OPEN_FILE:
-        {
-            const char* path = (const char*)(value & IPC_CMD_ARG_MASK);
-            f_close(&sPlayer.file); // no-op if nothing was open yet
+        case IPC_CMD_OPEN_FILE: {
+            const char *path = (const char *)(value & IPC_CMD_ARG_MASK);
+            f_close(&sPlayer.file);
             FRESULT result = f_open(&sPlayer.file, path, FA_OPEN_EXISTING | FA_READ);
             if (result != FR_OK)
                 fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_OPEN_FILE, 0));
-            else
-            {
+            else {
                 rememberCurPath(path);
                 fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_OPEN_FILE, 1));
             }
             break;
         }
-
-        case IPC_CMD_READ_HEADER:
-        {
-            fv_header_t* header = (fv_header_t*)(value & IPC_CMD_ARG_MASK);
+        case IPC_CMD_READ_HEADER: {
+            fv_header_t *header = (fv_header_t *)(value & IPC_CMD_ARG_MASK);
             f_read(&sPlayer.file, header, sizeof(fv_header_t), &br);
-
             sPlayer.nrKeyFrames = header->nrKeyFrames;
-
             gotoKeyFrame(0);
-
             u32 num = header->fpsNum;
             u32 den = header->fpsDen;
-
             int vblankCount = 1;
             while (num * (vblankCount + 1) / den < 62)
                 vblankCount++;
-
-            // stop any fps adjustment left running by a previously opened
-            // video first: fpsa_start() below silently no-ops if a
-            // previous session was never properly stopped (sActiveFpsa
-            // still set), which went unnoticed as long as this player only
-            // ever opened one file per run, but now that videos can be
-            // switched at runtime this left every video after the first
-            // one that needed adjustment running with broken/stale timing
-            // (heard as audio glitches, since audio/video sync depends on it)
             fpsa_stop(&sPlayer.fpsa);
-
-            // safety
-            if (num * vblankCount / den < 62)
-            {
+            if (num * vblankCount / den < 62) {
                 fpsa_init(&sPlayer.fpsa);
                 fpsa_setTargetFpsFraction(&sPlayer.fpsa, num * vblankCount, den);
-                sPlayer.fpsa.targetCycles =
-                    (double)sPlayer.fpsa.targetCycles * getAudioTimerValue(FV_AUDIO_RATE) * FV_AUDIO_RATE / 16756991.0;
+                sPlayer.fpsa.targetCycles = (double)sPlayer.fpsa.targetCycles * getAudioTimerValue(FV_AUDIO_RATE) * FV_AUDIO_RATE / 16756991.0;
                 fpsa_start(&sPlayer.fpsa);
             }
-
             fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_READ_HEADER, vblankCount));
             break;
         }
-
-        case IPC_CMD_GOTO_KEYFRAME:
-        {
+        case IPC_CMD_GOTO_KEYFRAME: {
             u32 frame = gotoKeyFrame(value & IPC_CMD_ARG_MASK);
             fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_GOTO_KEYFRAME, frame));
             break;
         }
-
-        case IPC_CMD_GOTO_NEAREST_KEYFRAME:
-        {
+        case IPC_CMD_GOTO_NEAREST_KEYFRAME: {
             u32 frame = value & IPC_CMD_ARG_MASK;
             u32 resultFrame;
             u32 keyFrame = gotoNearestKeyFrame(frame, &resultFrame);
@@ -558,15 +464,12 @@ static void handleFifo(u32 value)
             fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_GOTO_KEYFRAME, resultFrame));
             break;
         }
-
-        case IPC_CMD_CONTROL_AUDIO:
-        {
+        case IPC_CMD_CONTROL_AUDIO: {
             if ((value & IPC_CMD_ARG_MASK) == IPC_ARG_CONTROL_AUDIO_START)
                 startAudio();
             else if ((value & IPC_CMD_ARG_MASK) == IPC_ARG_CONTROL_AUDIO_STOP)
                 stopAudio();
-            else if ((value & IPC_CMD_ARG_MASK) == IPC_ARG_CONTROL_AUDIO_STOP_CLEAR)
-            {
+            else if ((value & IPC_CMD_ARG_MASK) == IPC_ARG_CONTROL_AUDIO_STOP_CLEAR) {
                 stopAudio();
                 sPlayer.ringPos = 0;
                 sPlayer.queueReadPtr = 0;
@@ -574,26 +477,20 @@ static void handleFifo(u32 value)
                 sPlayer.queueFrameCount = 0;
                 sPlayer.audioFramesNeeded = 0;
                 sPlayer.audioFramesProvided = 0;
-
                 memset(&sPlayer.audioQueueL[0][0], 0, sizeof(sPlayer.audioQueueL));
                 memset(&sPlayer.audioQueueR[0][0], 0, sizeof(sPlayer.audioQueueR));
             }
             break;
         }
-
-        case IPC_CMD_SETUP_DLDI:
-        {
-            if (!isDSiMode())
-            {
-                memcpy((void*)0x037F8000, (void*)(value & IPC_CMD_ARG_MASK), 16 * 1024);
+        case IPC_CMD_SETUP_DLDI: {
+            if (!isDSiMode()) {
+                memcpy((void *)0x037F8000, (void *)(value & IPC_CMD_ARG_MASK), 16 * 1024);
                 fat_mountDldi();
             }
             fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_SETUP_DLDI, 0));
             break;
         }
-
-        case IPC_CMD_HANDSHAKE:
-        {
+        case IPC_CMD_HANDSHAKE: {
             bool canUseWram = false;
             if (isDSiMode())
                 canUseWram = twr_isUnlocked();
@@ -607,9 +504,7 @@ void fv_main(void)
 {
     if (!fifoCheckValue32(FIFO_USER_01))
         irq_wait(false, IRQ_TIMER2 | IRQ_FIFO_NOT_EMPTY);
-
     updateAudio();
-
     if (fifoCheckValue32(FIFO_USER_01))
         handleFifo(fifoGetValue32(FIFO_USER_01));
 }
