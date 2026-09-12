@@ -18,20 +18,6 @@ static PlayerController* sPlayerController;
 
 extern u8 gDldiStub[];
 
-// free-running VBlank counter, used as a reliable timing reference for
-// input debouncing: while a video plays, PlayerController::Update() spins
-// in a tight, unthrottled loop (unlike while paused, which waits for
-// VBlank), so it can poll the physical buttons far faster than normal -
-// fast enough to catch a brief contact bounce on aging hardware as two
-// separate presses. VBlankCounter() gives PlayerController a time base
-// that doesn't depend on how fast that loop happens to be spinning.
-volatile u32 gVBlankCount = 0;
-
-static void vblankHandler()
-{
-    gVBlankCount++;
-}
-
 // scratch buffer used to receive the previous/next/random path found by the
 // arm7 (must be writable by the arm7 CPU, so plain main RAM, and cacheline
 // aligned so we can safely invalidate it)
@@ -131,14 +117,43 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
+// free-running 32-bit tick counter, used as a reliable timing reference for
+// input debouncing (see PlayerController::UpdateKeys()). This CANNOT be
+// based on IRQ_VBLANK/a vblank counter incremented from here: fvPlayer.c's
+// fv_startPlayer() calls its own irqSet(IRQ_VBLANK, ...) every time
+// playback (re)starts or seeks (needed for its own A/V sync), which
+// silently replaces whatever handler main.cpp installs - so a
+// vblank-counter approach freezes the instant the first video starts,
+// making any single-instance debounce state permanently stick after its
+// first use. TIMER0+TIMER1 (cascaded) are not touched anywhere else in
+// this codebase, so they give PlayerController an independent, always-
+// ticking time base regardless of what the FastVideo core does with
+// IRQ_VBLANK.
+static void InitDebounceTimer()
+{
+    TIMER0_DATA = 0;
+    TIMER0_CR = TIMER_DIV_1024 | TIMER_ENABLE;
+    TIMER1_DATA = 0;
+    TIMER1_CR = TIMER_CASCADE | TIMER_ENABLE;
+}
+
+// ticks at BUS_CLOCK/1024 (~32728.5 Hz on NDS), i.e. ~30.5us/tick
+u32 GetDebounceTicks()
+{
+    return ((u32)TIMER1_DATA << 16) | (u32)TIMER0_DATA;
+}
+
 int main(int argc, char** argv)
 {
     DC_FlushAll();
 
     mpu_enableVramCache();
 
-    irqSet(IRQ_VBLANK, vblankHandler);
+    // IRQ_VBLANK itself still needs to be enabled at the CPU level here -
+    // fvPlayer.c relies on it already being on when it installs its own
+    // handler, it never calls irqEnable() itself
     irqEnable(IRQ_VBLANK);
+    InitDebounceTimer();
 
     bool canUseWram = false;
     if (isDSiMode() && twr_isUnlocked())
