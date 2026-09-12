@@ -55,7 +55,7 @@ static void ShowVideoMessage()
         displayName[len - 3] = 0;
 
     char line2[32];
-    snprintf(line2, sizeof(line2), "BOUCLE:%s  ALEA:%s", sLoopEnabled ? "ON " : "OFF", sRandomEnabled ? "ON" : "OFF");
+    snprintf(line2, sizeof(line2), "ALEA:%s  BOUCLE:%s", sRandomEnabled ? "ON " : "OFF", sLoopEnabled ? "ON" : "OFF");
     sPlayerController->ShowMessage(displayName, line2);
 }
 
