@@ -1,4 +1,4 @@
-#include <nds.h>
+#include <nds.h>#include <nds.h>
 #include <string.h>
 #include <strings.h>
 #include <nds/fifocommon.h>
