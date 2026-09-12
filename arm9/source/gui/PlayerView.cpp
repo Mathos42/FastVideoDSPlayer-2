@@ -193,7 +193,7 @@ void PlayerView::Initialize()
     // permanent button-legend text, rendered once and kept for the whole
     // playback session (unlike the toast messages below, it never expires)
     _legendLine1Len = RenderTextLine("L/Y:PREC R/X:SUIV", _legendLine1TileAddr, MAX_LEGEND_CHARS);
-    _legendLine2Len = RenderTextLine("B:QUIT  ST:BCL  SE:ALEA", _legendLine2TileAddr, MAX_LEGEND_CHARS);
+    _legendLine2Len = RenderTextLine("B:QUIT  SE:ALEA  ST:BCL", _legendLine2TileAddr, MAX_LEGEND_CHARS);
 
     // everything allocated from here on is transient "toast" text: each
     // call to SetMessage() rewinds back to this point first, so it doesn't
