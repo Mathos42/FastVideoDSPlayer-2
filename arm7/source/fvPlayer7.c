@@ -352,6 +352,25 @@ static bool findAdjacentFvFile(int direction, char* outPath)
 // the currently open video, without needing to store the full file list:
 // pass 1 counts eligible files, pass 2 walks again down to a randomly picked
 // index. On success writes the full path into outPath and returns true.
+// Chris Wellons' "lowbias32" integer hash: cheap but well-mixed 32-bit
+// avalanche. Used to turn gFrameCounter (which only advances by 1 each
+// VBlank) into something suitable for picking a random index: two calls
+// close together in time (as happens with quick repeated presses, or a
+// single debounced press) have very similar raw counter values, and
+// `gFrameCounter % count` alone tends to land on the same, or a cyclically
+// repeating, index for a small `count` - which "randomly" picking video 2
+// every single time makes very obvious. Hashing first spreads nearby
+// counter values across the whole 32-bit range before the modulo.
+static u32 hash32(u32 x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
+
 static bool findRandomFvFile(char* outPath)
 {
     DIR dir;
@@ -378,7 +397,7 @@ static bool findRandomFvFile(char* outPath)
     if (count == 0)
         return false; // no other .fv file found
 
-    u32 pick = gFrameCounter % count;
+    u32 pick = hash32(gFrameCounter) % count;
 
     // pass 2: walk again down to the picked index
     if (f_opendir(&dir, dirPath) != FR_OK)
