@@ -4,17 +4,19 @@
 #define DIM_WAIT_SEC 5
 #define DIM_FADE_SEC 3
 
-// minimum number of VBlanks required between two accepted L/R/X/Y/B/START/
-// SELECT presses: while playing, this controller's Update() spins in a
-// tight, unthrottled loop (unlike while paused, which waits for
-// VBlank), so it can poll the physical buttons far faster than usual -
-// fast enough to catch a brief contact bounce on aging hardware as two
-// separate presses. ~6 VBlanks (~100ms) is comfortably longer than any
-// real switch bounce, but far shorter than a human could physically press
-// the same button twice.
-#define NAV_DEBOUNCE_VBLANKS 6
+// minimum number of debounce ticks required between two accepted
+// L/R/X/Y/B/START/SELECT presses (see GetDebounceTicks() comment in
+// main.cpp for why this can't be a vblank counter incremented from an
+// IRQ_VBLANK handler installed here): while playing, this controller's
+// Update() spins in a tight, unthrottled loop (unlike while paused, which
+// waits for VBlank), so it can poll the physical buttons far faster than
+// usual - fast enough to catch a brief contact bounce on aging hardware as
+// two separate presses. ~100ms is comfortably longer than any real switch
+// bounce, but far shorter than a human could physically press the same
+// button twice. GetDebounceTicks() ticks at BUS_CLOCK/1024 (~32728.5 Hz).
+#define NAV_DEBOUNCE_TICKS 3273
 
-extern volatile u32 gVBlankCount;
+extern u32 GetDebounceTicks();
 
 PlayerController::PlayerController(fv_player_t* player)
     : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
@@ -22,7 +24,7 @@ PlayerController::PlayerController(fv_player_t* player)
       _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE)
 {
     for (int i = 0; i < NAV_DB_COUNT; i++)
-        _lastNavActionVBlank[i] = gVBlankCount - NAV_DEBOUNCE_VBLANKS;
+        _lastNavActionTick[i] = GetDebounceTicks() - NAV_DEBOUNCE_TICKS;
 }
 
 void PlayerController::Initialize()
@@ -124,7 +126,7 @@ void PlayerController::UpdateTouch()
 
 void PlayerController::UpdateKeys()
 {
-    // debounce L/R/X/Y/B/START/SELECT only (see NAV_DEBOUNCE_VBLANKS comment
+    // debounce L/R/X/Y/B/START/SELECT only (see NAV_DEBOUNCE_TICKS comment
     // above) - the D-pad/A keys below are unaffected, since seeking already
     // relies on rapid, repeated triggers for its hold-to-continue behavior.
     // Each key/action has its OWN debounce slot (see NavDebounceSlot in the
@@ -132,38 +134,39 @@ void PlayerController::UpdateKeys()
     // R to skip) silently eat a press of another (e.g. START) landing
     // shortly after, since Triggered() only reflects a one-frame edge that
     // is lost for good if not consumed on that frame.
+    u32 nowTicks = GetDebounceTicks();
     auto debounced = [&](NavDebounceSlot slot) {
-        return (gVBlankCount - _lastNavActionVBlank[slot]) < NAV_DEBOUNCE_VBLANKS;
+        return (nowTicks - _lastNavActionTick[slot]) < NAV_DEBOUNCE_TICKS;
     };
 
     if (!debounced(NAV_DB_EXIT) && _inputProvider.Triggered(KEY_B))
     {
         _pendingNavAction = NAV_ACTION_EXIT;
-        _lastNavActionVBlank[NAV_DB_EXIT] = gVBlankCount;
+        _lastNavActionTick[NAV_DB_EXIT] = nowTicks;
         return;
     }
     if (!debounced(NAV_DB_TOGGLE_LOOP) && _inputProvider.Triggered(KEY_START))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_LOOP;
-        _lastNavActionVBlank[NAV_DB_TOGGLE_LOOP] = gVBlankCount;
+        _lastNavActionTick[NAV_DB_TOGGLE_LOOP] = nowTicks;
         return;
     }
     if (!debounced(NAV_DB_TOGGLE_RANDOM) && _inputProvider.Triggered(KEY_SELECT))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_RANDOM;
-        _lastNavActionVBlank[NAV_DB_TOGGLE_RANDOM] = gVBlankCount;
+        _lastNavActionTick[NAV_DB_TOGGLE_RANDOM] = nowTicks;
         return;
     }
     if (!debounced(NAV_DB_NEXT) && (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X)))
     {
         _pendingNavAction = NAV_ACTION_NEXT;
-        _lastNavActionVBlank[NAV_DB_NEXT] = gVBlankCount;
+        _lastNavActionTick[NAV_DB_NEXT] = nowTicks;
         return;
     }
     if (!debounced(NAV_DB_PREV) && (_inputProvider.Triggered(KEY_L) || _inputProvider.Triggered(KEY_Y)))
     {
         _pendingNavAction = NAV_ACTION_PREV;
-        _lastNavActionVBlank[NAV_DB_PREV] = gVBlankCount;
+        _lastNavActionTick[NAV_DB_PREV] = nowTicks;
         return;
     }
 

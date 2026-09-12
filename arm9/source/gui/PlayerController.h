@@ -64,7 +64,7 @@ private:
     };
 
     NavAction _pendingNavAction;
-    u32 _lastNavActionVBlank[NAV_DB_COUNT]; // for debouncing L/R/X/Y/B/START/SELECT (see UpdateKeys)
+    u32 _lastNavActionTick[NAV_DB_COUNT]; // for debouncing L/R/X/Y/B/START/SELECT (see UpdateKeys)
 
     void TogglePlayPause();
 
