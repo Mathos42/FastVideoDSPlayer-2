@@ -4,18 +4,11 @@
 #define DIM_WAIT_SEC 5
 #define DIM_FADE_SEC 3
 
-// minimum number of VBlanks required between two accepted presses of the
-// SAME button: while playing, this controller's Update() spins in a
-// tight, unthrottled loop (unlike while paused), so it polls the physical
-// buttons far faster than usual - fast enough to catch a brief contact
-// bounce on aging hardware as two separate presses. ~6 VBlanks (~100ms)
-// is comfortably longer than any real switch bounce, but far shorter than
-// a human could physically press the same button twice.
-// Each button has its own independent debounce timer so pressing one
-// button does NOT block the others.
-#define NAV_DEBOUNCE_VBLANKS 6
+// Ticks at BUS_CLOCK/1024 (~32728.5 Hz on NDS), ~30.5us/tick.
+// ~3273 ticks = ~100ms, comfortably longer than any real switch bounce.
+#define NAV_DEBOUNCE_TICKS 3273
 
-extern volatile u32 gVBlankCount;
+extern u32 GetDebounceTicks();
 
 PlayerController::PlayerController(fv_player_t* player)
     : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
@@ -23,14 +16,11 @@ PlayerController::PlayerController(fv_player_t* player)
       _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE)
 {
     for (int i = 0; i < 5; i++)
-        _lastNavActionVBlank[i] = gVBlankCount - NAV_DEBOUNCE_VBLANKS;
+        _lastNavActionVBlank[i] = GetDebounceTicks() - NAV_DEBOUNCE_TICKS;
 }
 
 PlayerController::~PlayerController()
 {
-    // Restaure le backlight du bas si on quitte pendant qu'il est éteint.
-    // _subBacklightOff ne peut être true que sur DSi (voir UpdateDim()),
-    // donc pas besoin de vérifier isDSiMode() ici.
     if (_subBacklightOff)
     {
         powerOn(PM_BACKLIGHT_BOTTOM);
@@ -41,12 +31,6 @@ PlayerController::~PlayerController()
 void PlayerController::Initialize()
 {
     _view.Initialize();
-
-    // sync to whatever is physically held right now, so that a button the
-    // user is still holding from just before this controller was created
-    // (e.g. L/R/X/Y held a little past a video switch) doesn't get
-    // misdetected as a brand new press on the very first Update() - see
-    // InputProvider::PrimeCurrentState()
     _inputProvider.PrimeCurrentState();
 
     _dimWaitFrames = DIM_WAIT_SEC * _player->fvHeader->fpsNum / _player->fvHeader->fpsDen;
@@ -82,7 +66,7 @@ void PlayerController::UpdateTouch()
 
     if (_inputProvider.Triggered(KEY_TOUCH))
     {
-        if (touch.px >= 16 && touch.px < 240 && touch.py >= /*117*/ 113 && touch.py < /*121*/ 125)
+        if (touch.px >= 16 && touch.px < 240 && touch.py >= 113 && touch.py < 125)
         {
             _seekPenDown = true;
             _seekLastFrame = -1;
@@ -93,8 +77,6 @@ void PlayerController::UpdateTouch()
         }
         else
         {
-            // tapped anywhere else on the touch screen: show the info toast
-            // (filename + loop/random state) on demand
             _pendingNavAction = NAV_ACTION_SHOW_INFO;
         }
     }
@@ -137,48 +119,47 @@ void PlayerController::UpdateTouch()
 
 void PlayerController::UpdateKeys()
 {
-    // Debounce indépendant par touche : chaque bouton a son propre
-    // timestamp, donc appuyer sur une touche ne bloque pas les autres.
-    bool bDebounced      = (gVBlankCount - _lastNavActionVBlank[0]) < NAV_DEBOUNCE_VBLANKS;
-    bool startDebounced  = (gVBlankCount - _lastNavActionVBlank[1]) < NAV_DEBOUNCE_VBLANKS;
-    bool selectDebounced = (gVBlankCount - _lastNavActionVBlank[2]) < NAV_DEBOUNCE_VBLANKS;
-    bool nextDebounced   = (gVBlankCount - _lastNavActionVBlank[3]) < NAV_DEBOUNCE_VBLANKS;
-    bool prevDebounced   = (gVBlankCount - _lastNavActionVBlank[4]) < NAV_DEBOUNCE_VBLANKS;
+    u32 now = GetDebounceTicks();
+
+    bool bDebounced      = (now - _lastNavActionVBlank[0]) < NAV_DEBOUNCE_TICKS;
+    bool startDebounced  = (now - _lastNavActionVBlank[1]) < NAV_DEBOUNCE_TICKS;
+    bool selectDebounced = (now - _lastNavActionVBlank[2]) < NAV_DEBOUNCE_TICKS;
+    bool nextDebounced   = (now - _lastNavActionVBlank[3]) < NAV_DEBOUNCE_TICKS;
+    bool prevDebounced   = (now - _lastNavActionVBlank[4]) < NAV_DEBOUNCE_TICKS;
 
     if (!bDebounced && _inputProvider.Triggered(KEY_B))
     {
         _pendingNavAction = NAV_ACTION_EXIT;
-        _lastNavActionVBlank[0] = gVBlankCount;
+        _lastNavActionVBlank[0] = now;
         return;
     }
     if (!startDebounced && _inputProvider.Triggered(KEY_START))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_LOOP;
-        _lastNavActionVBlank[1] = gVBlankCount;
+        _lastNavActionVBlank[1] = now;
         return;
     }
     if (!selectDebounced && _inputProvider.Triggered(KEY_SELECT))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_RANDOM;
-        _lastNavActionVBlank[2] = gVBlankCount;
+        _lastNavActionVBlank[2] = now;
         return;
     }
     if (!nextDebounced && (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X)))
     {
         _pendingNavAction = NAV_ACTION_NEXT;
-        _lastNavActionVBlank[3] = gVBlankCount;
+        _lastNavActionVBlank[3] = now;
         return;
     }
     if (!prevDebounced && (_inputProvider.Triggered(KEY_L) || _inputProvider.Triggered(KEY_Y)))
     {
         _pendingNavAction = NAV_ACTION_PREV;
-        _lastNavActionVBlank[4] = gVBlankCount;
+        _lastNavActionVBlank[4] = now;
         return;
     }
 
     if (_inputProvider.Current(KEY_LID))
     {
-        // pause when lid is closed
         if (_playing)
         {
             fv_pausePlayer(_player);
@@ -225,10 +206,6 @@ void PlayerController::UpdateDim()
         _subScreenStateCounter = 0;
     }
 
-    // Sur DS Lite/Phat, il n'y a qu'un seul contrôle de rétroéclairage
-    // hardware qui affecte les DEUX écrans. powerOff(PM_BACKLIGHT_BOTTOM)
-    // éteindrait aussi l'écran du haut (celui de la vidéo).
-    // Sur DSi/3DS, les deux écrans sont contrôlés indépendamment.
     if (isDSiMode())
     {
         if (_subBacklightOff && _subScreenState != SUB_SCREEN_STATE_OFF)
@@ -278,10 +255,6 @@ PlayerController::NavAction PlayerController::Update()
 {
     if (_player->videoEnded && _playing)
     {
-        // the video reached its end: stop audio/playback cleanly (instead of
-        // leaving the last audio buffer looping forever) and let the caller
-        // decide what happens next (repeat / next / random, depending on
-        // the loop/random flags it owns)
         fv_pausePlayer(_player);
         _playing = false;
         _pendingNavAction = NAV_ACTION_VIDEO_ENDED;
@@ -315,7 +288,7 @@ PlayerController::NavAction PlayerController::Update()
         _lastTime = -1;
     }
 
-    _inputProvider.Sample(); // todo: sample more frequently
+    _inputProvider.Sample();
     _inputProvider.Update();
     _inputRepeater.Update(&_inputProvider);
     UpdateTouch();
@@ -330,10 +303,6 @@ PlayerController::NavAction PlayerController::Update()
 void PlayerController::ShowMessage(const char* line1, const char* line2)
 {
     _view.SetMessage(line1, line2);
-    // while playing, PlayerView::Update()/VBlank() are normally only
-    // called once a second (when the displayed second changes), to avoid
-    // needless redraws; force an immediate refresh here so the toast (and
-    // the time display drawn alongside it) doesn't wait for that next tick
     _view.Update();
     _view.VBlank();
 }
