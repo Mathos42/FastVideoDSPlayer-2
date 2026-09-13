@@ -74,6 +74,7 @@ private:
 
 public:
     PlayerController(fv_player_t* player);
+    ~PlayerController();
 
     void Initialize();
 
