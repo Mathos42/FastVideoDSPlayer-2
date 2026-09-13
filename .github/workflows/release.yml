@@ -25,9 +25,9 @@ jobs:
         with:
           path: FastVideoDS.nds
 
-     - name: Release
-  uses: softprops/action-gh-release@v2
-  if: startsWith(github.ref, 'refs/tags/')
-  with:
-    files: |
-      FastVideoDS.nds
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            FastVideoDS.nds
