@@ -10,6 +10,7 @@
 #include "FastVideo/fvPlayer.h"
 #include "mpu.h"
 #include "gui/PlayerController.h"
+#include "gui/BrowserController.h"
 #include "../../common/twlwram.h"
 
 static DTCM_BSS fv_player_t sPlayer;
@@ -30,6 +31,12 @@ static char sCurPath[FV_MAX_PATH_LEN];
 static bool sCanUseWram;
 static bool sLoopEnabled = false;
 static bool sRandomEnabled = false;
+
+// standalone mode: no argv[1] at boot, so the built-in browser is the entry
+// point (and B during playback returns to it instead of quitting)
+static bool sStandalone = false;
+static char sBrowserDir[FV_MAX_PATH_LEN];
+static char sBrowserPick[FV_MAX_PATH_LEN];
 
 // returns the filename part of a path (after the last '/'), for display
 static const char* GetFileName(const char* path)
@@ -117,6 +124,150 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
+static void DestroyCurrentPlayer()
+{
+    if (sPlayerController)
+    {
+        delete sPlayerController;
+        sPlayerController = NULL;
+        fv_destroyPlayer(&sPlayer);
+    }
+}
+
+// "sd:/a/b" -> "sd:/a", "sd:/a" -> "sd:/", "sd:/" -> "sd:/"
+static void GetParentDir(const char* path, char* out, size_t outMax)
+{
+    const char* slash = strrchr(path, '/');
+    if (!slash)
+    {
+        strncpy(out, path, outMax - 1);
+        out[outMax - 1] = 0;
+        return;
+    }
+    size_t len = (size_t)(slash - path);
+    if (len == 0)
+    {
+        strncpy(out, "/", outMax - 1);
+        out[outMax - 1] = 0;
+        return;
+    }
+    if (len >= outMax)
+        len = outMax - 1;
+    memcpy(out, path, len);
+    out[len] = 0;
+    // "sd:" -> "sd:/" (device root)
+    if (strchr(out, ':') && !strchr(out, '/'))
+    {
+        if (len + 2 < outMax)
+        {
+            out[len] = '/';
+            out[len + 1] = 0;
+        }
+    }
+}
+
+// Runs the built-in browser until the user picks a video (returns 1, path
+// written to outPath and last dir to outDir) or asks to quit (returns 0).
+static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax)
+{
+    BrowserController browser;
+    if (!browser.OpenDir(sBrowserDir))
+        return 0;
+
+    char tmp[FV_MAX_PATH_LEN];
+    for (;;)
+    {
+        BrowserController::Action action = browser.Update();
+        switch (action)
+        {
+            case BrowserController::ACT_EXIT:
+                return 0;
+
+            case BrowserController::ACT_PLAY:
+                browser.GetSelectedPath(outPath, outPathMax);
+                strncpy(outDir, browser.GetCurDir(), outDirMax - 1);
+                outDir[outDirMax - 1] = 0;
+                return 1;
+
+            case BrowserController::ACT_OPEN_DIR:
+                browser.GetSelectedPath(tmp, sizeof(tmp));
+                browser.OpenDir(tmp);
+                break;
+
+            case BrowserController::ACT_PARENT:
+                GetParentDir(browser.GetCurDir(), tmp, sizeof(tmp));
+                browser.OpenDir(tmp);
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+// Runs the player until the user exits. Returns true if the whole app
+// should quit, false if control should go back to the browser.
+static bool RunPlayerLoop(bool canReturnToBrowser)
+{
+    bool shouldExit = false;
+    bool backToBrowser = false;
+
+    while (sPlayerController && !shouldExit)
+    {
+        PlayerController::NavAction action = sPlayerController->Update();
+        switch (action)
+        {
+            case PlayerController::NAV_ACTION_NEXT:
+                if (sRandomEnabled)
+                    switchToRandomVideo();
+                else
+                    switchToAdjacentVideo(true);
+                break;
+
+            case PlayerController::NAV_ACTION_PREV:
+                if (sRandomEnabled)
+                    switchToRandomVideo();
+                else
+                    switchToAdjacentVideo(false);
+                break;
+
+            case PlayerController::NAV_ACTION_VIDEO_ENDED:
+                if (sLoopEnabled)
+                    loadAndStartVideo(sCurPath);
+                else if (sRandomEnabled)
+                    switchToRandomVideo();
+                else
+                    switchToAdjacentVideo(true);
+                break;
+
+            case PlayerController::NAV_ACTION_TOGGLE_LOOP:
+                sLoopEnabled = !sLoopEnabled;
+                ShowVideoMessage();
+                break;
+
+            case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
+                sRandomEnabled = !sRandomEnabled;
+                ShowVideoMessage();
+                break;
+
+            case PlayerController::NAV_ACTION_SHOW_INFO:
+                ShowVideoMessage();
+                break;
+
+            case PlayerController::NAV_ACTION_EXIT:
+                shouldExit = true;
+                backToBrowser = canReturnToBrowser;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    DestroyCurrentPlayer();
+    return !backToBrowser;
+}
+
 // free-running 32-bit tick counter, used as a reliable timing reference for
 // input debouncing (see PlayerController::UpdateKeys()). This CANNOT be
 // based on IRQ_VBLANK/a vblank counter incremented from here: fvPlayer.c's
@@ -192,8 +343,6 @@ int main(int argc, char** argv)
 
     consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, /*0, 1*/ 2, 1, false, true);
 
-    // iprintf("FastVideoDS Player by Gericom\n\n");
-
     vramSetBankA(VRAM_A_LCD);
     vramSetBankB(VRAM_B_LCD);
     vramSetBankC(VRAM_C_LCD);
@@ -203,79 +352,43 @@ int main(int argc, char** argv)
     for (int i = 0; i < 3 * 128 * 1024; i += 4)
         *(vu32*)((u32)VRAM_A + i) = 0x80008000;
 
-    const char* filePath;
-
-    if (isDSiMode())
-        filePath = "sd:/testVideo.fv";
-    else
-        filePath = "fat:/testVideo.fv";
-
+    // launched with a video path (TWiLight Menu++ etc.): play it directly.
+    // launched without: standalone mode, the built-in browser is the entry
+    // point and B during playback returns to it.
+    const char* filePath = NULL;
     if (argc >= 2)
         filePath = argv[1];
+    sStandalone = (filePath == NULL);
 
-    if (loadAndStartVideo(filePath))
+    strncpy(sBrowserDir, isDSiMode() ? "sd:/" : "fat:/", sizeof(sBrowserDir) - 1);
+    sBrowserDir[sizeof(sBrowserDir) - 1] = 0;
+
+    bool quit = false;
+    while (!quit)
     {
-        bool shouldExit = false;
-        while (sPlayerController && !shouldExit)
+        if (filePath)
         {
-            PlayerController::NavAction action = sPlayerController->Update();
-            switch (action)
+            if (loadAndStartVideo(filePath))
+                quit = RunPlayerLoop(sStandalone);
+            else if (!sStandalone)
+                quit = true; // could not load the (initial) video: nothing to do but wait
+            filePath = NULL;
+        }
+        else
+        {
+            if (!sStandalone)
             {
-                case PlayerController::NAV_ACTION_NEXT:
-                    if (sRandomEnabled)
-                        switchToRandomVideo();
-                    else
-                        switchToAdjacentVideo(true);
-                    break;
-
-                case PlayerController::NAV_ACTION_PREV:
-                    if (sRandomEnabled)
-                        switchToRandomVideo();
-                    else
-                        switchToAdjacentVideo(false);
-                    break;
-
-                case PlayerController::NAV_ACTION_VIDEO_ENDED:
-                    if (sLoopEnabled)
-                        loadAndStartVideo(sCurPath);
-                    else if (sRandomEnabled)
-                        switchToRandomVideo();
-                    else
-                        switchToAdjacentVideo(true);
-                    break;
-
-                case PlayerController::NAV_ACTION_TOGGLE_LOOP:
-                    sLoopEnabled = !sLoopEnabled;
-                    ShowVideoMessage();
-                    break;
-
-                case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
-                    sRandomEnabled = !sRandomEnabled;
-                    ShowVideoMessage();
-                    break;
-
-                case PlayerController::NAV_ACTION_SHOW_INFO:
-                    ShowVideoMessage();
-                    break;
-
-                case PlayerController::NAV_ACTION_EXIT:
-                    shouldExit = true;
-                    break;
-
-                default:
-                    break;
+                quit = true;
+                break;
             }
+            if (RunBrowser(sBrowserPick, sizeof(sBrowserPick), sBrowserDir, sizeof(sBrowserDir)))
+                filePath = sBrowserPick;
+            else
+                quit = true;
         }
     }
-    else
-    {
-        // could not load the (initial) video: nothing to do but wait
-    }
-    if (sPlayerController)
-    {
-        delete sPlayerController;
-        fv_destroyPlayer(&sPlayer);
-    }
+
+    DestroyCurrentPlayer();
 
     // hand control back to the launcher (TWiLight Menu++, nds-bootstrap, ...)
     exit(0);
