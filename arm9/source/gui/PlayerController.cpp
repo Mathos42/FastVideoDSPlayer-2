@@ -26,6 +26,7 @@ PlayerController::~PlayerController()
         powerOn(PM_BACKLIGHT_BOTTOM);
         _subBacklightOff = false;
     }
+    REG_MASTER_BRIGHT_SUB = 0;
 }
 
 void PlayerController::Initialize()
