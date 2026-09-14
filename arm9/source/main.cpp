@@ -173,6 +173,7 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
 // on after listing (used when returning from playback).
 static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
+    PlayerController::RestoreSubScreen();
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
@@ -192,6 +193,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
                 browser.GetSelectedPath(outPath, outPathMax);
                 strncpy(outDir, browser.GetCurDir(), outDirMax - 1);
                 outDir[outDirMax - 1] = 0;
+                consoleClear();
                 return 1;
 
             case BrowserController::ACT_OPEN_DIR:
@@ -396,7 +398,8 @@ int main(int argc, char** argv)
     }
 
     DestroyCurrentPlayer();
-
+    PlayerController::RestoreSubScreen();
     // hand control back to the launcher (TWiLight Menu++, nds-bootstrap, ...)
+    
     exit(0);
 }

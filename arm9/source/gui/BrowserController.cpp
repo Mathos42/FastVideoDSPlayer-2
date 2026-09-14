@@ -7,6 +7,15 @@
 
 #define BROWSER_MAX_ENTRIES 512
 
+static bool IsRootDir(const char* path)
+{
+    // Root = "sd:/", "fat:/", or "/": the only '/' is at the end of the device
+    const char* colon = strchr(path, ':');
+    if (colon)
+        return (colon[1] == '/' && colon[2] == '\0');
+    return (strcmp(path, "/") == 0);
+}
+
 static fv_dir_entry_t sEntries[BROWSER_MAX_ENTRIES] ALIGN(32);
 static fv_listdir_req_t sListReq ALIGN(32);
 
@@ -52,6 +61,7 @@ BrowserController::BrowserController()
     : _inputRepeater(KEY_UP | KEY_DOWN, 12, 3),
       _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true)
 {
+    _view.Initialize();
     _curDir[0] = 0;
     _inputProvider.PrimeCurrentState();
 }
@@ -114,7 +124,7 @@ void BrowserController::RenderIfNeeded()
 {
     if (!_dirty)
         return;
-    _view.Render(_curDir, _entries, _count, _total, _cursor, _topLine);
+    _view.Render(_curDir, _entries, _count, _total, _cursor, _topLine, _loopEnabled, _randomEnabled);
     _dirty = false;
 }
 
@@ -142,9 +152,11 @@ BrowserController::Action BrowserController::Update()
             action = _entries[_cursor].isDir ? ACT_OPEN_DIR : ACT_PLAY;
     }
     else if (_inputProvider.Triggered(KEY_B))
-        action = ACT_PARENT;
+        action = IsRootDir(_curDir) ? ACT_EXIT : ACT_PARENT;
     else if (_inputProvider.Triggered(KEY_START))
-        action = ACT_EXIT;
+        action = ACT_TOGGLE_LOOP;
+    else if (_inputProvider.Triggered(KEY_SELECT))
+        action = ACT_TOGGLE_RANDOM;
 
     // touch: tapping a visible line selects and opens it
     if (action == ACT_NONE && _inputProvider.Triggered(KEY_TOUCH))

@@ -15,5 +15,6 @@ class BrowserView
 {
 public:
     void Initialize();
-    void Render(const char* dirPath, const fv_dir_entry_t* entries, u32 count, u32 total, u32 cursor, u32 topLine);
+    void Render(const char* dirPath, const fv_dir_entry_t* entries, u32 count, u32 total, u32 cursor, u32 topLine,
+                bool loopEnabled, bool randomEnabled);
 };
