@@ -49,8 +49,8 @@ static bool RequestListDir(const char* path)
 }
 
 BrowserController::BrowserController()
-    : _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true),
-      _inputRepeater(KEY_UP | KEY_DOWN, 12, 3)
+    : _inputRepeater(KEY_UP | KEY_DOWN, 12, 3),
+      _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true)
 {
     _curDir[0] = 0;
     _inputProvider.PrimeCurrentState();
