@@ -14,6 +14,8 @@ public:
         ACT_OPEN_DIR,
         ACT_PLAY,
         ACT_PARENT,
+        ACT_TOGGLE_LOOP,
+        ACT_TOGGLE_RANDOM,
         ACT_EXIT
     };
 
@@ -21,6 +23,7 @@ public:
 
     bool OpenDir(const char* path);
     void SelectEntryByName(const char* name);
+    void SetModes(bool loopEnabled, bool randomEnabled);
     Action Update();
     void GetSelectedPath(char* out, size_t outMax) const;
     const char* GetCurDir() const
@@ -43,4 +46,6 @@ private:
     u32 _cursor;
     u32 _topLine;
     bool _dirty;
+    bool _loopEnabled;
+    bool _randomEnabled;
 };
