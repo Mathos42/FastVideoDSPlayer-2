@@ -1,7 +1,7 @@
 #pragma once
 #include <nds.h>
 #include "../../../common/ipc.h"
-#include "core/InputProvider.h"
+#include "core/PadInputProvider.h"
 #include "core/InputRepeater.h"
 #include "BrowserView.h"
 
@@ -32,7 +32,7 @@ private:
     void RenderIfNeeded();
 
     BrowserView _view;
-    InputProvider _inputProvider;
+    PadInputProvider _inputProvider;
     InputRepeater _inputRepeater;
 
     char _curDir[FV_MAX_PATH_LEN];
