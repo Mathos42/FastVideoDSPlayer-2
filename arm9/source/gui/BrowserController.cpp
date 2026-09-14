@@ -7,6 +7,15 @@
 
 #define BROWSER_MAX_ENTRIES 512
 
+static bool IsRootDir(const char* path)
+{
+    // Root = "sd:/", "fat:/", or "/": the only '/' is at the end of the device
+    const char* colon = strchr(path, ':');
+    if (colon)
+        return (colon[1] == '/' && colon[2] == '\0');
+    return (strcmp(path, "/") == 0);
+}
+
 static fv_dir_entry_t sEntries[BROWSER_MAX_ENTRIES] ALIGN(32);
 static fv_listdir_req_t sListReq ALIGN(32);
 
