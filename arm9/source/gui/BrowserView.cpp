@@ -59,8 +59,18 @@ static void MakeDisplayName(const char* name, char* out, size_t outMax)
 
 void BrowserView::Initialize()
 {
+    // The player view leaves BG0/BG1 and sprites enabled on the sub screen
+    // (background art, progress bar, icons, help text). Hide everything
+    // before showing the console listing, otherwise those layers stay
+    // visible on top of it.
+    oamClear(&oamSub); // disables all 128 sub sprite entries
+    REG_DISPCNT_SUB = MODE_0_2D;
+
     consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
     consoleClear();
+
+    // only the console text BG remains visible
+    REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
 }
 
 void BrowserView::Render(const char* dirPath, const fv_dir_entry_t* entries, u32 count, u32 total, u32 cursor,
