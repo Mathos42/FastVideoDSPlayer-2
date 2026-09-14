@@ -20,6 +20,7 @@ public:
     BrowserController();
 
     bool OpenDir(const char* path);
+    void SelectEntryByName(const char* name);
     Action Update();
     void GetSelectedPath(char* out, size_t outMax) const;
     const char* GetCurDir() const
