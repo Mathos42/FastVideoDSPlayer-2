@@ -13,8 +13,8 @@ export TOPDIR	:=	$(CURDIR)
 NITRO_FILES	:= #nitrofiles
 
 # These set the information text in the nds file
-GAME_TITLE     := FastVideoDS Player
-GAME_SUBTITLE1 := Mod By Mathos
+GAME_TITLE     := FastVideoDSPlayer By Gericom
+GAME_SUBTITLE1 := Mathos42 Mod
 
 GAME_ICON := icon.bmp
 
