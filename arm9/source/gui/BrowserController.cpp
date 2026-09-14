@@ -141,10 +141,12 @@ BrowserController::Action BrowserController::Update()
         if (_cursor < _count)
             action = _entries[_cursor].isDir ? ACT_OPEN_DIR : ACT_PLAY;
     }
-    else if (_inputProvider.Triggered(KEY_B))
+        else if (_inputProvider.Triggered(KEY_B))
         action = ACT_PARENT;
     else if (_inputProvider.Triggered(KEY_START))
-        action = ACT_EXIT;
+        action = ACT_TOGGLE_LOOP;
+    else if (_inputProvider.Triggered(KEY_SELECT))
+        action = ACT_TOGGLE_RANDOM;
 
     // touch: tapping a visible line selects and opens it
     if (action == ACT_NONE && _inputProvider.Triggered(KEY_TOUCH))
