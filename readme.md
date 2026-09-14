@@ -21,7 +21,7 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Fonction boucle sur une vidéo et lecture aléatoire du répertoire
 - Mise à jour de la librairie FatFS en R0.16
 - Fichier nds rendu autonome, mais continu de fonctionner avec TWiLight Menu++ également.
-- Affichage des dossiers, choix de la vidéo à regarder.
+- Affichage des dossiers, choix de la vidéo à regarder (en mode autonome).
 - Y X L R SELECT et START fonctionnent également en mode autonome.
 - L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pose, sortir de la vidéo rétablissent l'écran du bas (dans les 2 modes, TWiLight Menu++ et autonome).
 
@@ -75,7 +75,7 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 - Loop function for a video and random playback of the folder
 - FatFS library updated to R0.16
 - The NDS file has been made standalone, but it still works with TWiLight Menu++ as well.
-- Displays folders and allows you to select which video to watch.
+- Displays folders and allows you to select which video to watch (in standalone mode).
 - Y, X, L, R, SELECT and START also work in standalone mode.
 - The bottom screen remains black between videos and when Y, X, L and R are pressed. Tapping the screen, pausing the video or exiting the video restores the bottom screen (in both modes: TWiLight Menu++ and standalone).
 
