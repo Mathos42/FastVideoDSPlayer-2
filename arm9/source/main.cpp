@@ -192,6 +192,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
                 browser.GetSelectedPath(outPath, outPathMax);
                 strncpy(outDir, browser.GetCurDir(), outDirMax - 1);
                 outDir[outDirMax - 1] = 0;
+                consoleClear();
                 return 1;
 
             case BrowserController::ACT_OPEN_DIR:
