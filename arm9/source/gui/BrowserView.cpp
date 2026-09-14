@@ -63,7 +63,7 @@ void BrowserView::Initialize()
     // (background art, progress bar, icons, help text). Hide everything
     // before showing the console listing, otherwise those layers stay
     // visible on top of it.
-    oamClear(&oamSub); // disables all 128 sub sprite entries
+    oamClear(&oamSub, 0, 128); // disables all 128 sub sprite entries
     REG_DISPCNT_SUB = MODE_0_2D;
 
     consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
@@ -74,7 +74,7 @@ void BrowserView::Initialize()
 }
 
 void BrowserView::Render(const char* dirPath, const fv_dir_entry_t* entries, u32 count, u32 total, u32 cursor,
-                         u32 topLine)
+                         u32 topLine, bool loopEnabled, bool randomEnabled)
 {
     char disp[FV_MAX_PATH_LEN];
 
@@ -107,5 +107,6 @@ void BrowserView::Render(const char* dirPath, const fv_dir_entry_t* entries, u32
     else
         iprintf("%lu entree(s)", (unsigned long)total);
 
-        iprintf("\x1b[23;0H\x1b[36mA:OUVRIR B:RETOUR ST/SE:MODES\x1b[0m");
+    iprintf("\x1b[13;0HBOUCLE:%s ALEA:%s START/SELECT", loopEnabled ? "ON " : "OFF", randomEnabled ? "ON " : "OFF");
+    iprintf("\x1b[23;0H\x1b[36mA:OUVRIR B:RETOUR ST/SE:MODES\x1b[0m");
 }
