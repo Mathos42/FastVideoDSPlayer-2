@@ -128,6 +128,7 @@ static void DestroyCurrentPlayer()
 {
     if (sPlayerController)
     {
+        fv_pausePlayer(&sPlayer);
         delete sPlayerController;
         sPlayerController = NULL;
         fv_destroyPlayer(&sPlayer);
