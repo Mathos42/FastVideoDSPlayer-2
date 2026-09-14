@@ -9,6 +9,7 @@
 #define IPC_CMD_FIND_NEXT_FILE        7
 #define IPC_CMD_FIND_PREV_FILE        8
 #define IPC_CMD_FIND_RANDOM_FILE      9
+#define IPC_CMD_LIST_DIR              10
 #define IPC_CMD_SETUP_DLDI            13
 #define IPC_CMD_HANDSHAKE             15
 
@@ -16,6 +17,26 @@
 // IPC_CMD_FIND_NEXT_FILE / IPC_CMD_FIND_PREV_FILE into the buffer
 // whose address is passed as the command argument
 #define FV_MAX_PATH_LEN 256
+
+// one directory entry returned by IPC_CMD_LIST_DIR
+#define FV_BROWSER_NAME_LEN 64
+
+typedef struct
+{
+    char name[FV_BROWSER_NAME_LEN];
+    u32 isDir;
+} fv_dir_entry_t;
+
+// request block for IPC_CMD_LIST_DIR, filled by the arm9, processed by the
+// arm7. The arm9 passes the address of this struct as the command argument.
+typedef struct
+{
+    char path[FV_MAX_PATH_LEN];   // in:  directory to list
+    fv_dir_entry_t* entries;      // in:  output buffer (arm9 main RAM)
+    u32 maxEntries;               // in:  capacity of entries[]
+    u32 count;                    // out: entries actually written
+    u32 total;                    // out: total matching entries in the dir
+} fv_listdir_req_t;
 
 #define IPC_CMD_ARG_MASK       0x0FFFFFFF
 #define IPC_CMD_CMD_SHIFT      28
