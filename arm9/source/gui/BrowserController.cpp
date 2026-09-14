@@ -124,7 +124,7 @@ void BrowserController::RenderIfNeeded()
 {
     if (!_dirty)
         return;
-    _view.Render(_curDir, _entries, _count, _total, _cursor, _topLine);
+    _view.Render(_curDir, _entries, _count, _total, _cursor, _topLine, _loopEnabled, _randomEnabled);
     _dirty = false;
 }
 
