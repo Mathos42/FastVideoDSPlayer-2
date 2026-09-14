@@ -14,7 +14,7 @@ NITRO_FILES	:= #nitrofiles
 
 # These set the information text in the nds file
 GAME_TITLE     := FastVideoDS Player
-GAME_SUBTITLE1 := By Gericom
+GAME_SUBTITLE1 := Mod By Mathos
 
 GAME_ICON := icon.bmp
 
