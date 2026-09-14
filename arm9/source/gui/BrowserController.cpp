@@ -150,8 +150,8 @@ BrowserController::Action BrowserController::Update()
         if (_cursor < _count)
             action = _entries[_cursor].isDir ? ACT_OPEN_DIR : ACT_PLAY;
     }
-        else if (_inputProvider.Triggered(KEY_B))
-        action = ACT_PARENT;
+    else if (_inputProvider.Triggered(KEY_B))
+        action = IsRootDir(_curDir) ? ACT_EXIT : ACT_PARENT;
     else if (_inputProvider.Triggered(KEY_START))
         action = ACT_TOGGLE_LOOP;
     else if (_inputProvider.Triggered(KEY_SELECT))
