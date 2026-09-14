@@ -128,7 +128,7 @@ static void DestroyCurrentPlayer()
 {
     if (sPlayerController)
     {
-        fv_pausePlayer(&sPlayer);
+        fv_pausePlayer(&sPlayer); // stop audio cleanly (stopAudioClearQueue) before teardown
         delete sPlayerController;
         sPlayerController = NULL;
         fv_destroyPlayer(&sPlayer);
@@ -169,11 +169,15 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
 
 // Runs the built-in browser until the user picks a video (returns 1, path
 // written to outPath and last dir to outDir) or asks to quit (returns 0).
-static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax)
+// selectName, if non-NULL, is the filename the cursor should be positioned
+// on after listing (used when returning from playback).
+static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
+    if (selectName)
+        browser.SelectEntryByName(selectName);
 
     char tmp[FV_MAX_PATH_LEN];
     for (;;)
@@ -382,7 +386,9 @@ int main(int argc, char** argv)
                 quit = true;
                 break;
             }
-            if (RunBrowser(sBrowserPick, sizeof(sBrowserPick), sBrowserDir, sizeof(sBrowserDir)))
+            // position the cursor on the video that was just playing (if any)
+            if (RunBrowser(sBrowserPick, sizeof(sBrowserPick), sBrowserDir, sizeof(sBrowserDir),
+                           sCurPath[0] ? GetFileName(sCurPath) : NULL))
                 filePath = sBrowserPick;
             else
                 quit = true;
