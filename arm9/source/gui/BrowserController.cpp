@@ -99,6 +99,8 @@ void BrowserController::RenderIfNeeded()
 
 BrowserController::Action BrowserController::Update()
 {
+    swiWaitForVBlank();
+
     _inputProvider.Sample();
     _inputProvider.Update();
     _inputRepeater.Update(&_inputProvider);
