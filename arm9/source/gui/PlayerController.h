@@ -67,7 +67,10 @@ private:
     u32 _invDimFadeFrames;
 
     NavAction _pendingNavAction;
-
+    // true when playback stopped because the video reached its end (as
+    // opposed to a user pause): UpdateDim() must not treat that as a pause
+    // and wake the sub screen, otherwise chaining videos re-lights it
+    bool _videoEnded;
     // Un timestamp de debounce séparé par touche pour éviter que l'appui
     // sur une touche ne bloque les autres pendant la fenêtre d'anti-rebond
     // index: 0=B, 1=START, 2=SELECT, 3=R/X, 4=L/Y
