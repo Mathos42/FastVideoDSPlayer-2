@@ -71,7 +71,28 @@ bool BrowserController::OpenDir(const char* path)
     RenderIfNeeded();
     return true;
 }
+void BrowserController::SelectEntryByName(const char* name)
+{
+    if (!name || _count == 0)
+        return;
 
+    for (u32 i = 0; i < _count; i++)
+    {
+        if (_entries[i].isDir != 0)
+            continue;
+        if (strcasecmp(_entries[i].name, name) == 0)
+        {
+            _cursor = i;
+            if (_cursor < _topLine)
+                _topLine = _cursor;
+            if (_cursor >= _topLine + BROWSER_VISIBLE_LINES)
+                _topLine = _cursor - BROWSER_VISIBLE_LINES + 1;
+            _dirty = true;
+            RenderIfNeeded();
+            return;
+        }
+    }
+}
 void BrowserController::MoveCursor(int delta)
 {
     if (_count == 0)
