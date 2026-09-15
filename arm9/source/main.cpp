@@ -173,14 +173,15 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
 // on after listing (used when returning from playback).
 static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
-    PlayerController::RestoreSubScreen(); // leaving video playback for good: re-light the sub screen
-
+    PlayerController::RestoreSubScreen();
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
+    // reflect the current loop/random state (set from the player, or left
+    // at false on first launch) instead of the default the constructor set
+    browser.SetModes(sLoopEnabled, sRandomEnabled);
     if (selectName)
         browser.SelectEntryByName(selectName);
-    browser.SetModes(sLoopEnabled, sRandomEnabled); // sync display with the current globals
 
     char tmp[FV_MAX_PATH_LEN];
     for (;;)
@@ -195,7 +196,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
                 browser.GetSelectedPath(outPath, outPathMax);
                 strncpy(outDir, browser.GetCurDir(), outDirMax - 1);
                 outDir[outDirMax - 1] = 0;
-                consoleClear(); // clean the sub screen before launching the video
+                consoleClear();
                 return 1;
 
             case BrowserController::ACT_OPEN_DIR:
