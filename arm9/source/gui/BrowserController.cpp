@@ -196,6 +196,18 @@ BrowserController::Action BrowserController::Update()
 
 void BrowserController::GetSelectedPath(char* out, size_t outMax) const
 {
+    if (outMax == 0)
+        return;
+    if (_cursor >= _count)
+    {
+        // no valid selection: return an empty string rather than reading
+        // _entries[_cursor] out of bounds. Callers (ACT_PLAY/ACT_OPEN_DIR in
+        // main.cpp) only reach this with a cursor guaranteed in range today,
+        // but this keeps any future caller safe too.
+        out[0] = 0;
+        return;
+    }
+
     strncpy(out, _curDir, outMax - 1);
     out[outMax - 1] = 0;
     size_t len = strlen(out);
