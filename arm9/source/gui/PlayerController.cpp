@@ -13,15 +13,16 @@ extern u32 GetDebounceTicks();
 bool PlayerController::sSubScreenOff = false;
 
 PlayerController::PlayerController(fv_player_t* player)
-    : _view(), _inputProvider(), _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _player(player),
-      _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false),
+    : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
       _playing(true), _lastTime(-1), _seekPenDown(false), _playPausePenDown(false), _seekLastFrame(-1),
-      _seekKeyFrame(0), _dimWaitFrames(0), _dimFadeFrames(0), _invDimFadeFrames(0),
-      _pendingNavAction(NAV_ACTION_NONE), _videoEnded(false)
+      _seekKeyFrame(0), _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE),
+      _videoEnded(false)
 {
     for (int i = 0; i < 5; i++)
         _lastNavActionVBlank[i] = GetDebounceTicks() - NAV_DEBOUNCE_TICKS;
 
+    // If the previous controller let the sub screen go dark (video chaining,
+    // L/R/X/Y skips), stay dark instead of flashing back on for a few seconds.
     if (sSubScreenOff)
     {
         _subScreenState = SUB_SCREEN_STATE_OFF;
@@ -50,8 +51,13 @@ void PlayerController::Initialize()
     // user is still holding from just before this controller was created
     // (e.g. L/R/X/Y held a little past a video switch) doesn't get
     // misdetected as a brand new press on the very first Update() - see
-    // InputProvider::PrimeCurrentState()
+    // InputProvider::PrimeCurrentState(). The repeater needs the same
+    // treatment: PrimeCurrentState() only syncs _inputProvider, so without
+    // this Reset() a LEFT/RIGHT held across the switch would still make
+    // the freshly-constructed _inputRepeater fire an immediate spurious
+    // repeat (see InputRepeater::Reset()).
     _inputProvider.PrimeCurrentState();
+    _inputRepeater.Reset();
 
     _dimWaitFrames = DIM_WAIT_SEC * _player->fvHeader->fpsNum / _player->fvHeader->fpsDen;
     _dimFadeFrames = DIM_FADE_SEC * _player->fvHeader->fpsNum / _player->fvHeader->fpsDen;
