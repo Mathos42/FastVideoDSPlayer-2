@@ -13,16 +13,15 @@ extern u32 GetDebounceTicks();
 bool PlayerController::sSubScreenOff = false;
 
 PlayerController::PlayerController(fv_player_t* player)
-    : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
+    : _view(), _inputProvider(), _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _player(player),
+      _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false),
       _playing(true), _lastTime(-1), _seekPenDown(false), _playPausePenDown(false), _seekLastFrame(-1),
-      _seekKeyFrame(0), _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE),
-      _videoEnded(false)
+      _seekKeyFrame(0), _dimWaitFrames(0), _dimFadeFrames(0), _invDimFadeFrames(0),
+      _pendingNavAction(NAV_ACTION_NONE), _videoEnded(false)
 {
     for (int i = 0; i < 5; i++)
         _lastNavActionVBlank[i] = GetDebounceTicks() - NAV_DEBOUNCE_TICKS;
 
-    // If the previous controller let the sub screen go dark (video chaining,
-    // L/R/X/Y skips), stay dark instead of flashing back on for a few seconds.
     if (sSubScreenOff)
     {
         _subScreenState = SUB_SCREEN_STATE_OFF;
