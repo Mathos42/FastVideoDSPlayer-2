@@ -104,6 +104,13 @@ void BrowserController::SelectEntryByName(const char* name)
         }
     }
 }
+void BrowserController::SetModes(bool loopEnabled, bool randomEnabled)
+{
+    _loopEnabled = loopEnabled;
+    _randomEnabled = randomEnabled;
+    _dirty = true;
+    RenderIfNeeded();
+}
 void BrowserController::MoveCursor(int delta)
 {
     if (_count == 0)
