@@ -67,6 +67,20 @@ BrowserController::BrowserController()
     _inputProvider.PrimeCurrentState();
 }
 
+// SetModes() was declared but never defined nor called: _loopEnabled/
+// _randomEnabled were left uninitialized (now fixed above) and START/SELECT
+// did nothing in the browser. See main.cpp's RunBrowser() for the wiring
+// that actually calls this now.
+void BrowserController::SetModes(bool loopEnabled, bool randomEnabled)
+{
+    if (loopEnabled == _loopEnabled && randomEnabled == _randomEnabled)
+        return;
+    _loopEnabled = loopEnabled;
+    _randomEnabled = randomEnabled;
+    _dirty = true;
+    RenderIfNeeded();
+}
+
 bool BrowserController::OpenDir(const char* path)
 {
     if (!RequestListDir(path))
@@ -103,13 +117,6 @@ void BrowserController::SelectEntryByName(const char* name)
             return;
         }
     }
-}
-void BrowserController::SetModes(bool loopEnabled, bool randomEnabled)
-{
-    _loopEnabled = loopEnabled;
-    _randomEnabled = randomEnabled;
-    _dirty = true;
-    RenderIfNeeded();
 }
 void BrowserController::MoveCursor(int delta)
 {
@@ -189,13 +196,6 @@ BrowserController::Action BrowserController::Update()
 
 void BrowserController::GetSelectedPath(char* out, size_t outMax) const
 {
-    if (_count == 0 || _cursor >= _count)
-    {
-        if (outMax > 0)
-            out[0] = 0;
-        return;
-    }
-
     strncpy(out, _curDir, outMax - 1);
     out[outMax - 1] = 0;
     size_t len = strlen(out);
