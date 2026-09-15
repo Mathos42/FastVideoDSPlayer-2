@@ -13,9 +13,9 @@ extern u32 GetDebounceTicks();
 bool PlayerController::sSubScreenOff = false;
 
 PlayerController::PlayerController(fv_player_t* player)
-    : _subScreenState(SUB_SCREEN_STATE_ACTIVE), _subScreenStateCounter(0), _subBacklightOff(false), _player(player),
-      _playing(true), _lastTime(-1), _seekPenDown(false), _playPausePenDown(false), _seekLastFrame(-1),
-      _seekKeyFrame(0), _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _pendingNavAction(NAV_ACTION_NONE),
+    : _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _player(player), _subScreenState(SUB_SCREEN_STATE_ACTIVE),
+      _subScreenStateCounter(0), _subBacklightOff(false), _playing(true), _lastTime(-1), _seekPenDown(false),
+      _playPausePenDown(false), _seekLastFrame(-1), _seekKeyFrame(0), _pendingNavAction(NAV_ACTION_NONE),
       _videoEnded(false)
 {
     for (int i = 0; i < 5; i++)
