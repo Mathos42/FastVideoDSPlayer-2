@@ -42,6 +42,5 @@ void InputRepeater::Update(const InputProvider* inputProvider)
 	{
 		_state = STATE_FIRST;
 		_frameCounter = 0;
-		_repKeys = curKeys & _mask;
 	}
 }
