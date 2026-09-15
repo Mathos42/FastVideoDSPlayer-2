@@ -240,9 +240,6 @@ bool fv_initPlayer(fv_player_t* player, const char* filePath, bool useWram)
         return false;
     if (player->vblankPerFrame == 0)
         return false;
-    // reject absurd headers once, here: every downstream consumer divides by
-    // fpsNum/fpsDen/nrFrames without any guard. vblankPerFrame==0 already
-    // caught one degenerate case above; this catches the rest.
     if (player->fvHeader->nrFrames == 0 || player->fvHeader->fpsNum == 0 || player->fvHeader->fpsDen == 0)
         return false; 
 
