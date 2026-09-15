@@ -40,6 +40,14 @@ void InputRepeater::Update(const InputProvider* inputProvider)
 	}
 	else if (curKeys & _mask)
 	{
+		// just start the initial-delay countdown here; do NOT arm _repKeys
+		// yet (that only happens once _frameCounter reaches _firstFrame,
+		// same as the STATE_FIRST branch above). Arming it immediately would
+		// fire a spurious repeat on the very first frame a key is seen held
+		// - including a key already held over from before this repeater
+		// existed (see InputProvider::PrimeCurrentState(), which only syncs
+		// the InputProvider side and does nothing for the repeater; call
+		// Reset() alongside it when recreating a controller mid-hold).
 		_state = STATE_FIRST;
 		_frameCounter = 0;
 	}
