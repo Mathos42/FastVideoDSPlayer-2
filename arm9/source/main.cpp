@@ -173,12 +173,14 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
 // on after listing (used when returning from playback).
 static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
-    PlayerController::RestoreSubScreen();
+    PlayerController::RestoreSubScreen(); // leaving video playback for good: re-light the sub screen
+
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
     if (selectName)
         browser.SelectEntryByName(selectName);
+    browser.SetModes(sLoopEnabled, sRandomEnabled); // sync display with the current globals
 
     char tmp[FV_MAX_PATH_LEN];
     for (;;)
@@ -193,7 +195,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
                 browser.GetSelectedPath(outPath, outPathMax);
                 strncpy(outDir, browser.GetCurDir(), outDirMax - 1);
                 outDir[outDirMax - 1] = 0;
-                consoleClear();
+                consoleClear(); // clean the sub screen before launching the video
                 return 1;
 
             case BrowserController::ACT_OPEN_DIR:
@@ -204,6 +206,16 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
             case BrowserController::ACT_PARENT:
                 GetParentDir(browser.GetCurDir(), tmp, sizeof(tmp));
                 browser.OpenDir(tmp);
+                break;
+
+            case BrowserController::ACT_TOGGLE_LOOP:
+                sLoopEnabled = !sLoopEnabled;
+                browser.SetModes(sLoopEnabled, sRandomEnabled);
+                break;
+
+            case BrowserController::ACT_TOGGLE_RANDOM:
+                sRandomEnabled = !sRandomEnabled;
+                browser.SetModes(sLoopEnabled, sRandomEnabled);
                 break;
 
             default:
