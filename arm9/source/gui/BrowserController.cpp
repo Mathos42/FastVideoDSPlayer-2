@@ -59,7 +59,8 @@ static bool RequestListDir(const char* path)
 
 BrowserController::BrowserController()
     : _inputRepeater(KEY_UP | KEY_DOWN, 12, 3),
-      _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true)
+      _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true),
+      _loopEnabled(false), _randomEnabled(false)
 {
     _view.Initialize();
     _curDir[0] = 0;
@@ -181,6 +182,13 @@ BrowserController::Action BrowserController::Update()
 
 void BrowserController::GetSelectedPath(char* out, size_t outMax) const
 {
+    if (_count == 0 || _cursor >= _count)
+    {
+        if (outMax > 0)
+            out[0] = 0;
+        return;
+    }
+
     strncpy(out, _curDir, outMax - 1);
     out[outMax - 1] = 0;
     size_t len = strlen(out);
