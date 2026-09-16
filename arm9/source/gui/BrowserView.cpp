@@ -36,7 +36,7 @@ static char Transliterate(unsigned char c)
     }
 }
 
-// decodes UTF-8 (ASCII + 2-byte latin-1 sequences) and transliterates
+// decodes UTF-8 (ASCII + 2/3/4-byte sequences) and transliterates
 static void MakeDisplayName(const char* name, char* out, size_t outMax)
 {
     size_t o = 0;
@@ -47,6 +47,16 @@ static void MakeDisplayName(const char* name, char* out, size_t outMax)
         {
             out[o++] = Transliterate((unsigned char)(((c & 0x1F) << 6) | (name[1] & 0x3F)));
             name += 2;
+        }
+        else if ((c & 0xF0) == 0xE0 && (name[1] & 0xC0) == 0x80 && (name[2] & 0xC0) == 0x80)
+        {
+            out[o++] = '?'; // 3-byte sequence: no latin-1 equivalent
+            name += 3;
+        }
+        else if ((c & 0xF8) == 0xF0 && (name[1] & 0xC0) == 0x80 && (name[2] & 0xC0) == 0x80 && (name[3] & 0xC0) == 0x80)
+        {
+            out[o++] = '?'; // 4-byte sequence (emoji, non-latin): same
+            name += 4;
         }
         else
         {

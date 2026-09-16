@@ -25,6 +25,20 @@ public:
 
 	void Update(const InputProvider* inputProvider);
 
+	// Re-arms the repeater to a clean IDLE state, with no pending trigger.
+	// Call this alongside InputProvider::PrimeCurrentState() whenever a
+	// controller (and its repeater) is recreated while a masked key may
+	// still be physically held (video chaining, L/R/X/Y skips, etc.) -
+	// otherwise the next Update() sees the held key and fires an immediate
+	// repeat before any real press was ever detected.
+	void Reset()
+	{
+		_trigKeys = 0;
+		_repKeys = 0;
+		_state = STATE_IDLE;
+		_frameCounter = 0;
+	}
+
 	u16 GetTriggeredKeys() const { return _trigKeys | _repKeys; }
 
     bool Triggered(u16 mask) const

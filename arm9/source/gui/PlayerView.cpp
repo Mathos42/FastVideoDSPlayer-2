@@ -13,12 +13,6 @@ PlayerView::PlayerView() : _robotoRegular10(RobotoRegular10_ntft)
 {
 }
 
-// Decodes the next character from a UTF-8 string, returning it as a Latin-1
-// codepoint (0-255) when possible so it can index NtftFont's 256-entry
-// character table. Understands plain ASCII plus 2-byte UTF-8 sequences that
-// map onto the Latin-1 Supplement block (accented French letters: é, è, à,
-// ç, ù, â, ê, î, ô, û, and their uppercase forms all fall in this range).
-// Anything else is passed through as-is (best effort). Advances *text.
 static unsigned char DecodeNextChar(const char** text)
 {
     unsigned char c = (unsigned char)**text;
@@ -26,21 +20,24 @@ static unsigned char DecodeNextChar(const char** text)
         return 0;
     if ((c & 0xE0) == 0xC0 && ((*text)[1] & 0xC0) == 0x80)
     {
-        // 2-byte UTF-8 sequence; only C2/C3 leads (Latin-1 Supplement,
-        // U+0080-U+00FF) decode to something this font could plausibly have
         unsigned char c2 = (unsigned char)(*text)[1];
         *text += 2;
         return (unsigned char)(((c & 0x1F) << 6) | (c2 & 0x3F));
+    }
+    if ((c & 0xF0) == 0xE0 && ((*text)[1] & 0xC0) == 0x80 && ((*text)[2] & 0xC0) == 0x80)
+    {
+        *text += 3;
+        return '?';
+    }
+    if ((c & 0xF8) == 0xF0 && ((*text)[1] & 0xC0) == 0x80 && ((*text)[2] & 0xC0) == 0x80 && ((*text)[3] & 0xC0) == 0x80)
+    {
+        *text += 4;
+        return '?';
     }
     (*text)++;
     return c;
 }
 
-// VRAM_I, mapped to the sub-screen's sprite (OBJ) memory by main.cpp
-// (vramSetBankI(VRAM_I_SUB_SPRITE)), is only 16KB in total. Writing sprite
-// tile data past that boundary silently corrupts whatever comes after
-// (which, on real hardware, showed up as garbled/missing digits) since
-// VramManager itself has no notion of the underlying bank's real size.
 static const int SUB_SPRITE_VRAM_SIZE = 16 * 1024;
 
 int PlayerView::RenderTextLine(const char* text, u16* tileAddr, int maxChars)
@@ -49,8 +46,6 @@ int PlayerView::RenderTextLine(const char* text, u16* tileAddr, int maxChars)
     unsigned char c;
     while (n < maxChars && (c = DecodeNextChar(&text)) != 0)
     {
-        // hard safety net: never allocate past the physical VRAM bank,
-        // no matter what miscalculated the caller's char budget
         if ((int)_subObj.GetState() + CHAR_CELL_W * CHAR_CELL_H / 2 > SUB_SPRITE_VRAM_SIZE)
             break;
 
@@ -129,9 +124,9 @@ void PlayerView::Initialize()
         SPRITE_PALETTE_SUB[48 + i] = RGB5(rnew, gnew, bnew);
     }
 
-    _twoDigitObjAddr = _subObj.Alloc(/*100*/ 60 * 2 * 32) >> 5;
+    _twoDigitObjAddr = _subObj.Alloc(60 * 2 * 32) >> 5;
     char twoDigitStr[3];
-    for (int i = 0; i < /*100*/ 60; i++)
+    for (int i = 0; i < 60; i++)
     {
         memset(_textTmpBuf, 0, sizeof(_textTmpBuf));
         twoDigitStr[0] = '0' + ((u32)i / 10);
@@ -176,8 +171,8 @@ void PlayerView::Initialize()
     _robotoRegular10.CreateStringData(twoDigitStr, _textTmpBuf, 8);
     uiutil_convertToObj(_textTmpBuf + 2 * 8, 8, 8, 8, &SPRITE_GFX_SUB[_colonObjAddr << 4]);
 
-    SetCurrentTime(0 * 60 * 60 + 16 * 60 + 27);
     SetTotalTime(3 * 60 * 60 + 48 * 60 + 59);
+    SetCurrentTime(0 * 60 * 60 + 16 * 60 + 27);
 
     _circleObjAddr = _subObj.Alloc(32 * 20) >> 5;
     dmaCopyWords(3, circle0Tiles, &SPRITE_GFX_SUB[_circleObjAddr << 4], circle0TilesLen);
@@ -190,14 +185,9 @@ void PlayerView::Initialize()
 
     _playing = false;
 
-    // permanent button-legend text, rendered once and kept for the whole
-    // playback session (unlike the toast messages below, it never expires)
     _legendLine1Len = RenderTextLine("L/Y:PREC R/X:SUIV", _legendLine1TileAddr, MAX_LEGEND_CHARS);
     _legendLine2Len = RenderTextLine("B:QUIT  SE:ALEA  ST:BCL", _legendLine2TileAddr, MAX_LEGEND_CHARS);
 
-    // everything allocated from here on is transient "toast" text: each
-    // call to SetMessage() rewinds back to this point first, so it doesn't
-    // grow unbounded in VRAM as the message changes over and over
     _msgVramCheckpoint = _subObj.GetState();
     _msgLine1Len = 0;
     _msgLine2Len = 0;
@@ -207,33 +197,27 @@ void PlayerView::Initialize()
 int PlayerView::RenderColon(SpriteEntry* oam, int x, int y)
 {
     x += _colonOffset;
-
-    oam[0].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_SQUARE | y; // OBJ_Y(y);
-    oam[0].attribute[1] = ATTR1_SIZE_8 | x;                                                     // OBJ_X(x);
+    oam[0].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_SQUARE | y;
+    oam[0].attribute[1] = ATTR1_SIZE_8 | x;
     oam[0].attribute[2] = ATTR2_PRIORITY(3) | ATTR2_PALETTE(1) | _colonObjAddr;
-
     return x + _colonWidth;
 }
 
 int PlayerView::RenderSingleDigit(SpriteEntry* oam, int digit, int x, int y)
 {
     x += _oneDigitOffset[digit];
-
-    oam[0].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_SQUARE | y; // OBJ_Y(y);
-    oam[0].attribute[1] = ATTR1_SIZE_8 | x;                                                     // OBJ_X(x);
+    oam[0].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_SQUARE | y;
+    oam[0].attribute[1] = ATTR1_SIZE_8 | x;
     oam[0].attribute[2] = ATTR2_PRIORITY(3) | ATTR2_PALETTE(1) | (_oneDigitObjAddr + digit);
-
     return x + _oneDigitWidth[digit] + _oneDigitEndOffset[digit];
 }
 
 int PlayerView::RenderDoubleDigit(SpriteEntry* oam, int digits, int x, int y)
 {
     x += _twoDigitOffset[digits];
-
-    oam[0].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_WIDE | y; // OBJ_Y(y);
-    oam[0].attribute[1] = ATTR1_SIZE_8 | x;                                                   // OBJ_X(x);
+    oam[0].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_WIDE | y;
+    oam[0].attribute[1] = ATTR1_SIZE_8 | x;
     oam[0].attribute[2] = ATTR2_PRIORITY(3) | ATTR2_PALETTE(1) | (_twoDigitObjAddr + digits * 2);
-
     return x + _twoDigitWidth[digits] + _twoDigitEndOffset[digits];
 }
 
@@ -247,7 +231,6 @@ void PlayerView::Update()
     memcpy(&oams[0], _curTimeOams, sizeof(_curTimeOams));
     memcpy(&oams[5], _totalTimeOams, sizeof(_totalTimeOams));
 
-    // circle
     oams[11].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_SQUARE | 140;
     oams[11].attribute[1] = ATTR1_SIZE_32 | 110;
     oams[11].attribute[2] = ATTR2_PRIORITY(3) | ATTR2_PALETTE(3) | _circleObjAddr;
@@ -258,14 +241,10 @@ void PlayerView::Update()
     oams[13].attribute[1] = ATTR1_SIZE_16 | ATTR1_FLIP_Y | 110;
     oams[13].attribute[2] = ATTR2_PRIORITY(3) | ATTR2_PALETTE(3) | _circleObjAddr;
 
-    // play/pause
     oams[10].attribute[0] = ATTR0_NORMAL | ATTR0_TYPE_NORMAL | ATTR0_COLOR_16 | ATTR0_SQUARE | (146 + 4);
     oams[10].attribute[1] = ATTR1_SIZE_16 | (116 + 4);
     oams[10].attribute[2] = ATTR2_PRIORITY(3) | ATTR2_PALETTE(2) | (_playing ? _pauseIconObjAddr : _playIconObjAddr);
 
-    // button-legend + toast (filename + loop/random state, or a toggle
-    // confirmation): both shown together on demand (touch screen / START /
-    // SELECT), hidden the rest of the time
     if (_msgVisible)
     {
         int idx = 14;
@@ -281,11 +260,11 @@ void PlayerView::Update()
 
 void PlayerView::SetMessage(const char* line1, const char* line2)
 {
-    _subObj.SetState(_msgVramCheckpoint); // reclaim VRAM used by the previous toast, if any
+    _subObj.SetState(_msgVramCheckpoint);
     _msgLine1Len = RenderTextLine(line1, _msgLine1TileAddr, MAX_MSG_CHARS);
     _msgLine2Len = line2 ? RenderTextLine(line2, _msgLine2TileAddr, MAX_MSG_CHARS) : 0;
     _msgVisible = true;
-    _msgHideAtTime = _curTime + 3; // hide 3 (video-timeline) seconds from now
+    _msgHideAtTime = _curTime + 3;
 }
 
 void PlayerView::VBlank()
@@ -305,9 +284,9 @@ void PlayerView::VBlank()
 
 void PlayerView::SetTotalTime(u32 totalTime)
 {
-    _totalTime = totalTime;
+    _totalTime = totalTime > 35999 ? 35999 : totalTime;
 
-    _invTotalTime = 0x800000 / _totalTime;
+    _invTotalTime = _totalTime ? 0x800000 / _totalTime : 0;
 
     u32 totalH = _totalTime / 3600;
     u32 totalM = _totalTime / 60 % 60;
@@ -343,7 +322,7 @@ void PlayerView::SetTotalTime(u32 totalTime)
 
 void PlayerView::SetCurrentTime(u32 currentTime)
 {
-    _curTime = currentTime;
+    _curTime = currentTime > 35999 ? 35999 : currentTime;
 
     int x = 16;
     if (_totalTime >= 3600)

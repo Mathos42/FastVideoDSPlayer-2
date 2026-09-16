@@ -177,6 +177,9 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
+    // reflect the current loop/random state (set from the player, or left
+    // at false on first launch) instead of the default the constructor set
+    browser.SetModes(sLoopEnabled, sRandomEnabled);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -204,6 +207,16 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
             case BrowserController::ACT_PARENT:
                 GetParentDir(browser.GetCurDir(), tmp, sizeof(tmp));
                 browser.OpenDir(tmp);
+                break;
+
+            case BrowserController::ACT_TOGGLE_LOOP:
+                sLoopEnabled = !sLoopEnabled;
+                browser.SetModes(sLoopEnabled, sRandomEnabled);
+                break;
+
+            case BrowserController::ACT_TOGGLE_RANDOM:
+                sRandomEnabled = !sRandomEnabled;
+                browser.SetModes(sLoopEnabled, sRandomEnabled);
                 break;
 
             default:

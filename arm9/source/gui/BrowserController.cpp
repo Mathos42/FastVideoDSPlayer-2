@@ -59,11 +59,26 @@ static bool RequestListDir(const char* path)
 
 BrowserController::BrowserController()
     : _inputRepeater(KEY_UP | KEY_DOWN, 12, 3),
-      _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true)
+      _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true),
+      _loopEnabled(false), _randomEnabled(false)
 {
     _view.Initialize();
     _curDir[0] = 0;
     _inputProvider.PrimeCurrentState();
+}
+
+// SetModes() was declared but never defined nor called: _loopEnabled/
+// _randomEnabled were left uninitialized (now fixed above) and START/SELECT
+// did nothing in the browser. See main.cpp's RunBrowser() for the wiring
+// that actually calls this now.
+void BrowserController::SetModes(bool loopEnabled, bool randomEnabled)
+{
+    if (loopEnabled == _loopEnabled && randomEnabled == _randomEnabled)
+        return;
+    _loopEnabled = loopEnabled;
+    _randomEnabled = randomEnabled;
+    _dirty = true;
+    RenderIfNeeded();
 }
 
 bool BrowserController::OpenDir(const char* path)
@@ -181,6 +196,18 @@ BrowserController::Action BrowserController::Update()
 
 void BrowserController::GetSelectedPath(char* out, size_t outMax) const
 {
+    if (outMax == 0)
+        return;
+    if (_cursor >= _count)
+    {
+        // no valid selection: return an empty string rather than reading
+        // _entries[_cursor] out of bounds. Callers (ACT_PLAY/ACT_OPEN_DIR in
+        // main.cpp) only reach this with a cursor guaranteed in range today,
+        // but this keeps any future caller safe too.
+        out[0] = 0;
+        return;
+    }
+
     strncpy(out, _curDir, outMax - 1);
     out[outMax - 1] = 0;
     size_t len = strlen(out);
