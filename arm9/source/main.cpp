@@ -127,21 +127,37 @@ static u32 getRand(u32 maxVal) {
 // Nouvelle fonction qui scanne TOUTE la carte SD depuis l'ARM9
 static void switchToRandomVideoAll()
 {
-    if (sPlayerController) {
-        fv_pausePlayer(&sPlayer); // Coupe le son AVANT la recherche
-        sPlayerController->ShowMessage("Recherche SD...", "Veuillez patienter");
-        swiWaitForVBlank(); // Affiche le message à l'écran immédiatement pour la DSi
+    // On ferme et détruit COMPLÈTEMENT le lecteur vidéo avant la recherche.
+    // Cela libère la carte SD et empêche le crash/retour menu dû aux conflits d'accès.
+    if (sPlayerController)
+    {
+        fv_pausePlayer(&sPlayer);
+        delete sPlayerController;
+        sPlayerController = NULL;
+        fv_destroyPlayer(&sPlayer);
     }
+    
+    // Comme on a supprimé l'interface du lecteur, on affiche un message direct sur la console texte
+    consoleClear();
+    printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
+    swiWaitForVBlank();
     
     int count = 0;
     char selectedPath[FV_MAX_PATH_LEN];
     selectedPath[0] = '\0';
     
     int stackTop = 0;
-    // On démarre à la racine
     strncpy(sDirStack[stackTop++], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
     
+    int loops = 0;
     while (stackTop > 0) {
+        
+        // On laisse respirer la console tous les 5 dossiers
+        // (Évite à 100% que nds-bootstrap ne panique avec son watchdog)
+        if (++loops % 5 == 0) {
+            swiWaitForVBlank();
+        }
+
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[--stackTop], FV_MAX_PATH_LEN - 1);
         
@@ -155,8 +171,6 @@ static void switchToRandomVideoAll()
         
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
         
-        // CRITIQUE POUR LA DSi : Laisser la console "respirer" au lieu de bloquer brutalement
-        // Cela empêche le watchdog de nds-bootstrap de redémarrer la console.
         while (!fifoCheckValue32(FIFO_USER_02)) {
             swiWaitForVBlank();
         }
@@ -185,17 +199,14 @@ static void switchToRandomVideoAll()
             strcat(fullPath, sListEntries[i].name);
             
             if (sListEntries[i].isDir) {
-                // Protège contre le débordement de mémoire si trop de sous-dossiers
                 if (stackTop < MAX_DIR_STACK) {
                     strncpy(sDirStack[stackTop++], fullPath, FV_MAX_PATH_LEN - 1);
                 }
             } else {
-                // Vérifier si c'est bien une vidéo .fv
                 if (nameLen > 3 && strcasecmp(sListEntries[i].name + nameLen - 3, ".fv") == 0) {
-                    if (strcasecmp(fullPath, sCurPath) == 0) continue; // Ignorer la vidéo actuelle
+                    if (strcasecmp(fullPath, sCurPath) == 0) continue; 
                     
                     count++;
-                    // Algorithme "Reservoir sampling"
                     if (getRand(count) == 0) {
                         strncpy(selectedPath, fullPath, FV_MAX_PATH_LEN - 1);
                         selectedPath[FV_MAX_PATH_LEN - 1] = '\0';
@@ -206,10 +217,11 @@ static void switchToRandomVideoAll()
     }
     
     if (count > 0) {
+        // La recherche est finie, on recrée et lance la nouvelle vidéo
         loadAndStartVideo(selectedPath);
     } else {
-        // En cas d'erreur (rien trouvé), on prend la vidéo suivante normale
-        switchToAdjacentVideo(true);
+        // Si aucune autre vidéo n'a été trouvée sur la SD, on relance l'ancienne
+        if (sCurPath[0]) loadAndStartVideo(sCurPath);
     }
 }
 
