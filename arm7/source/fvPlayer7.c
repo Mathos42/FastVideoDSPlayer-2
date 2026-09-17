@@ -9,6 +9,7 @@
 #include "irqWait.h"
 #include "../../common/twlwram.h"
 #include "fvPlayer7.h"
+#include <stdlib.h>
 
 #define FV_AUDIO_START_OFFSET 12
 #define FV_AUDIO_CH_LEFT 1
