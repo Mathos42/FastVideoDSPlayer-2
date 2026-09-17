@@ -14,7 +14,6 @@
 #include "../../common/twlwram.h"
 
 static DTCM_BSS fv_player_t sPlayer;
-
 static PlayerController* sPlayerController;
 
 extern u8 gDldiStub[];
@@ -31,6 +30,27 @@ static int sRandomMode = 0;
 static bool sStandalone = false;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
+
+// --- GESTION DE L'HISTORIQUE (Pour éviter les répétitions) ---
+#define HISTORY_SIZE 20
+static char sHistory[HISTORY_SIZE][FV_MAX_PATH_LEN];
+static int sHistoryCount = 0;
+static int sHistoryIdx = 0;
+
+static void AddToHistory(const char* path) {
+    strncpy(sHistory[sHistoryIdx], path, FV_MAX_PATH_LEN - 1);
+    sHistory[sHistoryIdx][FV_MAX_PATH_LEN - 1] = '\0';
+    sHistoryIdx = (sHistoryIdx + 1) % HISTORY_SIZE;
+    if (sHistoryCount < HISTORY_SIZE) sHistoryCount++;
+}
+
+static bool IsInHistory(const char* path) {
+    for (int i = 0; i < sHistoryCount; i++) {
+        if (strcasecmp(sHistory[i], path) == 0) return true;
+    }
+    return false;
+}
+// -------------------------------------------------------------
 
 u32 GetDebounceTicks();
 
@@ -75,6 +95,9 @@ static bool loadAndStartVideo(const char* path)
     strncpy(sCurPath, path, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
 
+    // Ajout à l'historique pour ne plus la repiocher de suite
+    AddToHistory(sCurPath);
+
     if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
     {
         fv_destroyPlayer(&sPlayer);
@@ -110,30 +133,32 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
-// Variables pour scanner la SD sans exploser la RAM
+// Variables pour scanner la SD
 #define MAX_DIR_STACK 256
 static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
 static fv_listdir_req_t sListReq ALIGN(32);
 static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
-// Générateur pseudo-aléatoire léger pour éviter de surcharger la mémoire
-static u32 getRand(u32 maxVal) {
-    static u32 seed = 0;
-    if (seed == 0) seed = GetDebounceTicks() ^ 0x55555555;
-    seed = (1103515245 * seed + 12345);
-    return (seed >> 16) % maxVal;
-}
-
-// Nouvelle fonction qui scanne TOUTE la carte SD depuis l'ARM9
+// Nouvelle fonction qui scanne TOUTE la carte SD
 static void switchToRandomVideoAll()
 {
-    // On met en pause proprement l'ancienne vidéo sans détruire l'interface
-    if (sPlayerController) {
-        fv_pausePlayer(&sPlayer); // Coupe le son et stoppe la lecture
-        sPlayerController->ShowMessage("Recherche SD...", "Veuillez patienter");
-        swiWaitForVBlank();
-        swiWaitForVBlank(); // On attend deux frames pour que le message s'affiche bien
+    if (sPlayerController)
+    {
+        fv_pausePlayer(&sPlayer);
+        delete sPlayerController;
+        sPlayerController = NULL;
+        fv_destroyPlayer(&sPlayer);
     }
+    
+    // CRITIQUE : Laisser à la carte SD le temps de fermer le fichier physiquement
+    // pour éviter le crash / retour TWiLight Menu++ (environ 250ms).
+    for (int i = 0; i < 15; i++) {
+        swiWaitForVBlank();
+    }
+    
+    consoleClear();
+    printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
+    swiWaitForVBlank();
     
     int count = 0;
     char selectedPath[FV_MAX_PATH_LEN];
@@ -142,15 +167,17 @@ static void switchToRandomVideoAll()
     int stackTop = 0;
     strncpy(sDirStack[stackTop++], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
     
+    // Graine aléatoire unique basée sur le temps
+    u32 seed = GetDebounceTicks() ^ 0x13579BDF;
+
     while (stackTop > 0) {
         
-        // CRITIQUE : A chaque nouveau dossier, on laisse respirer la console.
-        // Cela empêche totalement nds-bootstrap de redémarrer la console.
+        // Anti-watchdog pour DSi (laisse respirer la console)
         swiWaitForVBlank();
 
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[--stackTop], FV_MAX_PATH_LEN - 1);
-        currentDir[FV_MAX_PATH_LEN - 1] = '\0'; // Sécurité absolue
+        currentDir[FV_MAX_PATH_LEN - 1] = '\0';
         
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
@@ -163,7 +190,7 @@ static void switchToRandomVideoAll()
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
         
         while (!fifoCheckValue32(FIFO_USER_02)) {
-            swiWaitForVBlank(); // On yield pendant la lecture de la carte SD
+            swiWaitForVBlank(); 
         }
         
         u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
@@ -174,7 +201,6 @@ static void switchToRandomVideoAll()
         if (!ok) continue;
         
         for (u32 i = 0; i < sListReq.count; i++) {
-            // Ignorer dossiers systèmes
             if (sListEntries[i].name[0] == '.') continue;
             if (strcasecmp(sListEntries[i].name, "System Volume Information") == 0) continue;
             if (strcasecmp(sListEntries[i].name, "_nds") == 0) continue;
@@ -197,8 +223,15 @@ static void switchToRandomVideoAll()
                 if (nameLen > 3 && strcasecmp(sListEntries[i].name + nameLen - 3, ".fv") == 0) {
                     if (strcasecmp(fullPath, sCurPath) == 0) continue; 
                     
+                    // On empêche de rejouer l'une des 20 dernières vidéos !
+                    if (IsInHistory(fullPath)) continue;
+                    
                     count++;
-                    if (getRand(count) == 0) {
+                    // Génération aléatoire robuste
+                    seed = (1103515245 * seed + 12345);
+                    u32 randVal = (seed >> 16) % count;
+                    
+                    if (randVal == 0) {
                         strncpy(selectedPath, fullPath, FV_MAX_PATH_LEN - 1);
                         selectedPath[FV_MAX_PATH_LEN - 1] = '\0';
                     }
@@ -207,12 +240,11 @@ static void switchToRandomVideoAll()
         }
     }
     
-    if (count > 0) {
-        // En lançant la nouvelle vidéo, loadAndStartVideo détruit l'ancienne interface
-        // et en recrée une vierge, ce qui fait disparaître le texte "Recherche SD..." !
+    if (count > 0 && selectedPath[0] != '\0') {
         loadAndStartVideo(selectedPath);
     } else {
-        // Relance la vidéo d'origine si rien d'autre n'a été trouvé
+        // Si on a vu toutes les vidéos de la SD (ou que tout est dans l'historique)
+        if (count == 0) sHistoryCount = 0; // On vide l'historique pour pouvoir repiocher
         if (sCurPath[0]) loadAndStartVideo(sCurPath);
     }
 }
@@ -347,10 +379,8 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
                 if (sStandalone) {
-                    // Navigateur autonome : 0 -> 1 -> 0
                     sRandomMode = (sRandomMode == 0) ? 1 : 0;
                 } else {
-                    // TWiLight Menu++ : 0 -> 1 -> 2 -> 0
                     sRandomMode++;
                     if (sRandomMode > 2) sRandomMode = 0;
                 }
