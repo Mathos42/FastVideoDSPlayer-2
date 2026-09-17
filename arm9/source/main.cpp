@@ -111,7 +111,7 @@ static void switchToRandomVideo()
 }
 
 // Variables pour scanner la SD sans exploser la RAM
-#define MAX_DIR_STACK 32
+#define MAX_DIR_STACK 256
 static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
 static fv_listdir_req_t sListReq ALIGN(32);
 static fv_dir_entry_t sListEntries[256] ALIGN(32);
@@ -128,8 +128,9 @@ static u32 getRand(u32 maxVal) {
 static void switchToRandomVideoAll()
 {
     if (sPlayerController) {
-        fv_pausePlayer(&sPlayer);
+        fv_pausePlayer(&sPlayer); // Coupe le son AVANT la recherche
         sPlayerController->ShowMessage("Recherche SD...", "Veuillez patienter");
+        swiWaitForVBlank(); // Affiche le message à l'écran immédiatement pour la DSi
     }
     
     int count = 0;
@@ -140,20 +141,26 @@ static void switchToRandomVideoAll()
     // On démarre à la racine
     strncpy(sDirStack[stackTop++], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
     
-    while (stackTop > 0 && stackTop < MAX_DIR_STACK) {
+    while (stackTop > 0) {
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[--stackTop], FV_MAX_PATH_LEN - 1);
         
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
         sListReq.entries = sListEntries;
-        sListReq.maxEntries = 256; // Max 256 fichiers par dossier lu
+        sListReq.maxEntries = 256; 
         
         DC_FlushRange(&sListReq, sizeof(sListReq));
         DC_FlushRange(sListEntries, sizeof(sListEntries));
         
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
-        fifoWaitValue32(FIFO_USER_02);
+        
+        // CRITIQUE POUR LA DSi : Laisser la console "respirer" au lieu de bloquer brutalement
+        // Cela empêche le watchdog de nds-bootstrap de redémarrer la console.
+        while (!fifoCheckValue32(FIFO_USER_02)) {
+            swiWaitForVBlank();
+        }
+        
         u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
         
         DC_InvalidateRange(&sListReq, sizeof(sListReq));
@@ -178,6 +185,7 @@ static void switchToRandomVideoAll()
             strcat(fullPath, sListEntries[i].name);
             
             if (sListEntries[i].isDir) {
+                // Protège contre le débordement de mémoire si trop de sous-dossiers
                 if (stackTop < MAX_DIR_STACK) {
                     strncpy(sDirStack[stackTop++], fullPath, FV_MAX_PATH_LEN - 1);
                 }
@@ -335,7 +343,7 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
                 if (sStandalone) {
-                    // Navigateur : 0 -> 1 -> 0
+                    // Navigateur autonome : 0 -> 1 -> 0
                     sRandomMode = (sRandomMode == 0) ? 1 : 0;
                 } else {
                     // TWiLight Menu++ : 0 -> 1 -> 2 -> 0
