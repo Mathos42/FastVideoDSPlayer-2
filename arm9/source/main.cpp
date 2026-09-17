@@ -127,20 +127,13 @@ static u32 getRand(u32 maxVal) {
 // Nouvelle fonction qui scanne TOUTE la carte SD depuis l'ARM9
 static void switchToRandomVideoAll()
 {
-    // On ferme et détruit COMPLÈTEMENT le lecteur vidéo avant la recherche.
-    // Cela libère la carte SD et empêche le crash/retour menu dû aux conflits d'accès.
-    if (sPlayerController)
-    {
-        fv_pausePlayer(&sPlayer);
-        delete sPlayerController;
-        sPlayerController = NULL;
-        fv_destroyPlayer(&sPlayer);
+    // On met en pause proprement l'ancienne vidéo sans détruire l'interface
+    if (sPlayerController) {
+        fv_pausePlayer(&sPlayer); // Coupe le son et stoppe la lecture
+        sPlayerController->ShowMessage("Recherche SD...", "Veuillez patienter");
+        swiWaitForVBlank();
+        swiWaitForVBlank(); // On attend deux frames pour que le message s'affiche bien
     }
-    
-    // Comme on a supprimé l'interface du lecteur, on affiche un message direct sur la console texte
-    consoleClear();
-    printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
-    swiWaitForVBlank();
     
     int count = 0;
     char selectedPath[FV_MAX_PATH_LEN];
@@ -149,17 +142,15 @@ static void switchToRandomVideoAll()
     int stackTop = 0;
     strncpy(sDirStack[stackTop++], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
     
-    int loops = 0;
     while (stackTop > 0) {
         
-        // On laisse respirer la console tous les 5 dossiers
-        // (Évite à 100% que nds-bootstrap ne panique avec son watchdog)
-        if (++loops % 5 == 0) {
-            swiWaitForVBlank();
-        }
+        // CRITIQUE : A chaque nouveau dossier, on laisse respirer la console.
+        // Cela empêche totalement nds-bootstrap de redémarrer la console.
+        swiWaitForVBlank();
 
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[--stackTop], FV_MAX_PATH_LEN - 1);
+        currentDir[FV_MAX_PATH_LEN - 1] = '\0'; // Sécurité absolue
         
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
@@ -172,7 +163,7 @@ static void switchToRandomVideoAll()
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
         
         while (!fifoCheckValue32(FIFO_USER_02)) {
-            swiWaitForVBlank();
+            swiWaitForVBlank(); // On yield pendant la lecture de la carte SD
         }
         
         u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
@@ -217,10 +208,11 @@ static void switchToRandomVideoAll()
     }
     
     if (count > 0) {
-        // La recherche est finie, on recrée et lance la nouvelle vidéo
+        // En lançant la nouvelle vidéo, loadAndStartVideo détruit l'ancienne interface
+        // et en recrée une vierge, ce qui fait disparaître le texte "Recherche SD..." !
         loadAndStartVideo(selectedPath);
     } else {
-        // Si aucune autre vidéo n'a été trouvée sur la SD, on relance l'ancienne
+        // Relance la vidéo d'origine si rien d'autre n'a été trouvé
         if (sCurPath[0]) loadAndStartVideo(sCurPath);
     }
 }
