@@ -204,10 +204,6 @@ static bool hasFvExtension(const char *name)
     return len > 3 && strcasecmp(name + len - 3, ".fv") == 0;
 }
 
-// Lists a directory for the standalone browser: fills req->entries with up
-// to req->maxEntries entries (directories and .fv files only, dotfiles
-// skipped). Returns 1 if the directory could be opened, 0 otherwise.
-// Sorting is done on the arm9 side (qsort), the arm7 only fills the buffer.
 static u32 listDirInto(fv_listdir_req_t* req)
 {
     DIR dir;
@@ -319,14 +315,12 @@ static u32 hash32(u32 x)
     return x;
 }
 
-// NOUVEAU : Construit le "bag" d'indices mélangés
 static void buildShuffleBag(void)
 {
     DIR dir;
     FILINFO info;
     const char *dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
     
-    // Passage 1 : compter les fichiers éligibles (hors vidéo en cours)
     if (f_opendir(&dir, dirPath) != FR_OK) {
         sPlayer.shuffleRemaining = 0;
         return;
@@ -336,7 +330,6 @@ static void buildShuffleBag(void)
     while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
         if (info.fattrib & AM_DIR) continue;
         if (!hasFvExtension(info.fname)) continue;
-        // EXCLUSION CRITIQUE : empêche la dernière vidéo lue d'être dans le nouveau bag
         if (strcasecmp(info.fname, sPlayer.curName) == 0) continue;
         count++;
     }
@@ -350,7 +343,6 @@ static void buildShuffleBag(void)
     
     sPlayer.shuffleCount = (count > MAX_SHUFFLE_FILES) ? MAX_SHUFFLE_FILES : (u16)count;
     
-    // Passage 2 : initialiser les indices et mélanger (Fisher-Yates)
     for (u16 i = 0; i < sPlayer.shuffleCount; i++) {
         sPlayer.shuffleIndices[i] = i;
     }
@@ -366,17 +358,12 @@ static void buildShuffleBag(void)
     sPlayer.shuffleRemaining = sPlayer.shuffleCount;
     strncpy(sPlayer.shuffleDir, sPlayer.curDir, FV_MAX_PATH_LEN - 1);
     sPlayer.shuffleDir[FV_MAX_PATH_LEN - 1] = 0;
-    // Fige le nom exclu utilisé pour compter/indexer ci-dessus : curName va
-    // changer à chaque tirage suivant, mais l'énumération du dossier doit
-    // rester identique pendant toute la durée de vie de ce bag
     strncpy(sPlayer.shuffleExcludedName, sPlayer.curName, FV_MAX_PATH_LEN - 1);
     sPlayer.shuffleExcludedName[FV_MAX_PATH_LEN - 1] = 0;
 }
 
-// MODIFIÉ : Utilise le bag au lieu d'un tirage avec remise
 static bool findRandomFvFile(char *outPath)
 {
-    // Reconstruire le bag si le dossier a changé ou s'il est épuisé
     if (sPlayer.shuffleRemaining == 0 || strcmp(sPlayer.shuffleDir, sPlayer.curDir) != 0) {
         buildShuffleBag();
     }
@@ -385,11 +372,9 @@ static bool findRandomFvFile(char *outPath)
         return false;
     }
     
-    // Piocher l'indice cible dans le bag mélangé (de la fin vers le début)
     u16 targetIdx = sPlayer.shuffleIndices[sPlayer.shuffleRemaining - 1];
     sPlayer.shuffleRemaining--;
     
-    // Passage 3 : retrouver le fichier correspondant à l'indice cible
     DIR dir;
     FILINFO info;
     const char *dirPath = sPlayer.curDir[0] ? sPlayer.curDir : ".";
@@ -415,6 +400,55 @@ static bool findRandomFvFile(char *outPath)
     return found;
 }
 
+// --- DEBUT AJOUT POUR LE MODE ALEATOIRE TOUTE LA SD ---
+static int fv_random_all_count = 0;
+static char fv_random_all_selected[FV_MAX_PATH_LEN];
+
+static void scan_for_random_all(const char* dirPath) {
+    DIR dir;
+    FILINFO info;
+    
+    if (f_opendir(&dir, dirPath) != FR_OK) return;
+
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
+        // Ignorer les dossiers cachés et systèmes de la console
+        if (info.fname[0] == '.') continue;
+        if (strcasecmp(info.fname, "System Volume Information") == 0) continue;
+        if (strcasecmp(info.fname, "_nds") == 0) continue;
+
+        char fullPath[FV_MAX_PATH_LEN];
+        int dirLen = strlen(dirPath);
+        int nameLen = strlen(info.fname);
+        
+        if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
+        
+        strcpy(fullPath, dirPath);
+        if (dirLen > 0 && fullPath[dirLen - 1] != '/') {
+            strcat(fullPath, "/");
+        }
+        strcat(fullPath, info.fname);
+
+        if (info.fattrib & AM_DIR) {
+            scan_for_random_all(fullPath); // Appel récursif
+        } else {
+            if (hasFvExtension(info.fname)) {
+                // Exclure la vidéo actuellement lue
+                if (strcasecmp(info.fname, sPlayer.curName) == 0) continue;
+
+                fv_random_all_count++;
+                
+                // Reservoir Sampling (sélection aléatoire en un seul passage)
+                u32 r = hash32(gFrameCounter + fv_random_all_count) % fv_random_all_count;
+                if (r == 0) {
+                    strncpy(fv_random_all_selected, fullPath, FV_MAX_PATH_LEN);
+                }
+            }
+        }
+    }
+    f_closedir(&dir);
+}
+// --- FIN AJOUT ---
+
 static void handleFindFile(u32 value, void *userdata)
 {
     switch (value >> IPC_CMD_CMD_SHIFT) {
@@ -434,6 +468,23 @@ static void handleFindFile(u32 value, void *userdata)
             char *outPath = (char *)(value & IPC_CMD_ARG_MASK);
             bool found = findRandomFvFile(outPath);
             fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE, found ? 1 : 0));
+            break;
+        }
+        case IPC_CMD_FIND_RANDOM_FILE_ALL: {
+            char *outPath = (char *)(value & IPC_CMD_ARG_MASK);
+            fv_random_all_count = 0;
+            memset(fv_random_all_selected, 0, sizeof(fv_random_all_selected));
+            
+            // Scanner depuis la racine de la carte SD
+            scan_for_random_all("/"); 
+            
+            bool found = false;
+            if (fv_random_all_count > 0) {
+                strncpy(outPath, fv_random_all_selected, FV_MAX_PATH_LEN);
+                found = true;
+            }
+            
+            fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE_ALL, found ? 1 : 0));
             break;
         }
         case IPC_CMD_LIST_DIR:
