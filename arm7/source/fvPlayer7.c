@@ -203,6 +203,42 @@ static bool hasFvExtension(const char *name)
     return len > 3 && strcasecmp(name + len - 3, ".fv") == 0;
 }
 
+// Lists a directory for the standalone browser: fills req->entries with up
+// to req->maxEntries entries (directories and .fv files only, dotfiles
+// skipped). Returns 1 if the directory could be opened, 0 otherwise.
+// Sorting is done on the arm9 side (qsort), the arm7 only fills the buffer.
+static u32 listDirInto(fv_listdir_req_t* req)
+{
+    DIR dir;
+    FILINFO info;
+
+    req->count = 0;
+    req->total = 0;
+
+    if (f_opendir(&dir, req->path) != FR_OK)
+        return 0;
+
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0)
+    {
+        int isDir = (info.fattrib & AM_DIR) != 0;
+        if (info.fname[0] == '.')
+            continue;
+        if (!isDir && !hasFvExtension(info.fname))
+            continue;
+
+        req->total++;
+        if (req->count < req->maxEntries)
+        {
+            strncpy(req->entries[req->count].name, info.fname, FV_BROWSER_NAME_LEN - 1);
+            req->entries[req->count].name[FV_BROWSER_NAME_LEN - 1] = 0;
+            req->entries[req->count].isDir = isDir ? 1 : 0;
+            req->count++;
+        }
+    }
+    f_closedir(&dir);
+    return 1;
+}
+
 static void joinCurDirAndName(const char *name, char *outPath)
 {
     if (sPlayer.curDir[0]) {
@@ -397,6 +433,13 @@ static void handleFindFile(u32 value, void *userdata)
             char *outPath = (char *)(value & IPC_CMD_ARG_MASK);
             bool found = findRandomFvFile(outPath);
             fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE, found ? 1 : 0));
+            break;
+        }
+        case IPC_CMD_LIST_DIR:
+        {
+            fv_listdir_req_t* req = (fv_listdir_req_t*)(value & IPC_CMD_ARG_MASK);
+            u32 ok = listDirInto(req);
+            fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, ok));
             break;
         }
     }

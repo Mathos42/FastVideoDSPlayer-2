@@ -240,6 +240,12 @@ bool fv_initPlayer(fv_player_t* player, const char* filePath, bool useWram)
         return false;
     if (player->vblankPerFrame == 0)
         return false;
+    // reject corrupt/truncated headers before any consumer (PlayerController,
+    // PlayerView) divides by these fields (nrFrames -> total time, fps ->
+    // dim timers): a signature can be valid while the rest of the header
+    // is garbage (e.g. SD card pulled mid-write)
+    if (player->fvHeader->nrFrames == 0 || player->fvHeader->fpsNum == 0 || player->fvHeader->fpsDen == 0)
+        return false;
 
     int height = player->fvHeader->height;
 
