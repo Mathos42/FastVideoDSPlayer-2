@@ -23,7 +23,7 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Fichier nds rendu autonome, mais continu de fonctionner avec TWiLight Menu++ également.
 - Affichage des dossiers, choix de la vidéo à regarder (en mode autonome).
 - Y X L R SELECT et START fonctionnent également en mode autonome.
-- L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pose, sortir de la vidéo rétablissent l'écran du bas (dans les 2 modes, TWiLight Menu++ et autonome).
+- L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas (dans les 2 modes, TWiLight Menu++ et autonome).
 
 ATTENTION ! En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (40 fichiers dans un même répertoire, plus exactement 39 fichiers + le répertoire RETOUR).  
 En mode autonome mon code limite à 512 fichiers dans un seul et même répertoire.  
