@@ -128,6 +128,7 @@ static u32 getRand(u32 maxVal) {
 static void switchToRandomVideoAll()
 {
     if (sPlayerController) {
+        fv_pausePlayer(&sPlayer);
         sPlayerController->ShowMessage("Recherche SD...", "Veuillez patienter");
     }
     
