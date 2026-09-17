@@ -30,7 +30,9 @@ static char sCurPath[FV_MAX_PATH_LEN];
 
 static bool sCanUseWram;
 static bool sLoopEnabled = false;
-static bool sRandomEnabled = false;
+
+// 0: OFF, 1: ON (Folder), 2: ON ALL (Entire SD card)
+static int sRandomMode = 0; 
 
 // standalone mode: no argv[1] at boot, so the built-in browser is the entry
 // point (and B during playback returns to it instead of quitting)
@@ -62,7 +64,12 @@ static void ShowVideoMessage()
         displayName[len - 3] = 0;
 
     char line2[32];
-    snprintf(line2, sizeof(line2), "ALEA:%s  BOUCLE:%s", sRandomEnabled ? "ON " : "OFF", sLoopEnabled ? "ON" : "OFF");
+    const char* randomStateStr;
+    if (sRandomMode == 2) randomStateStr = "ON ALL";
+    else if (sRandomMode == 1) randomStateStr = "ON ";
+    else randomStateStr = "OFF";
+
+    snprintf(line2, sizeof(line2), "ALEA:%s  BOUCLE:%s", randomStateStr, sLoopEnabled ? "ON" : "OFF");
     sPlayerController->ShowMessage(displayName, line2);
 }
 
@@ -124,6 +131,21 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
+// Asks the arm7 for a random ".fv" file across the entire SD card,
+// and switches to it if found.
+static void switchToRandomVideoAll()
+{
+    fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE_ALL, (u32)sAdjacentPath));
+    fifoWaitValue32(FIFO_USER_02);
+    u32 found = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
+    if (!found)
+        return; // no other video found, keep playing
+
+    DC_InvalidateRange(sAdjacentPath, sizeof(sAdjacentPath));
+    loadAndStartVideo(sAdjacentPath);
+}
+
+
 static void DestroyCurrentPlayer()
 {
     if (sPlayerController)
@@ -179,7 +201,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
         return 0;
     // reflect the current loop/random state (set from the player, or left
     // at false on first launch) instead of the default the constructor set
-    browser.SetModes(sLoopEnabled, sRandomEnabled);
+    browser.SetModes(sLoopEnabled, sRandomMode > 0);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -211,12 +233,13 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
 
             case BrowserController::ACT_TOGGLE_LOOP:
                 sLoopEnabled = !sLoopEnabled;
-                browser.SetModes(sLoopEnabled, sRandomEnabled);
+                browser.SetModes(sLoopEnabled, sRandomMode > 0);
                 break;
 
             case BrowserController::ACT_TOGGLE_RANDOM:
-                sRandomEnabled = !sRandomEnabled;
-                browser.SetModes(sLoopEnabled, sRandomEnabled);
+                // Only basic toggle in the browser
+                sRandomMode = (sRandomMode == 0) ? 1 : 0; 
+                browser.SetModes(sLoopEnabled, sRandomMode > 0);
                 break;
 
             default:
@@ -238,14 +261,18 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
         switch (action)
         {
             case PlayerController::NAV_ACTION_NEXT:
-                if (sRandomEnabled)
+                if (sRandomMode == 2)
+                    switchToRandomVideoAll();
+                else if (sRandomMode == 1)
                     switchToRandomVideo();
                 else
                     switchToAdjacentVideo(true);
                 break;
 
             case PlayerController::NAV_ACTION_PREV:
-                if (sRandomEnabled)
+                if (sRandomMode == 2)
+                    switchToRandomVideoAll();
+                else if (sRandomMode == 1)
                     switchToRandomVideo();
                 else
                     switchToAdjacentVideo(false);
@@ -254,7 +281,9 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
             case PlayerController::NAV_ACTION_VIDEO_ENDED:
                 if (sLoopEnabled)
                     loadAndStartVideo(sCurPath);
-                else if (sRandomEnabled)
+                else if (sRandomMode == 2)
+                    switchToRandomVideoAll();
+                else if (sRandomMode == 1)
                     switchToRandomVideo();
                 else
                     switchToAdjacentVideo(true);
@@ -266,7 +295,14 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
                 break;
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
-                sRandomEnabled = !sRandomEnabled;
+                if (sStandalone) {
+                    // Browser mode: toggle between OFF (0) and ON folder (1)
+                    sRandomMode = (sRandomMode == 0) ? 1 : 0;
+                } else {
+                    // TWiLight Menu++ mode: toggle OFF (0) -> ON folder (1) -> ON ALL (2)
+                    sRandomMode++;
+                    if (sRandomMode > 2) sRandomMode = 0;
+                }
                 ShowVideoMessage();
                 break;
 
