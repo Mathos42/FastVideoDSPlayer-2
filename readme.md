@@ -28,8 +28,6 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 ATTENTION ! En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (40 fichiers dans un même répertoire, plus exactement 39 fichiers + le répertoire RETOUR).  
 En mode autonome mon code limite à 512 fichiers dans un seul et même répertoire.  
 
-  Mise à jour actuellement à l'essai
-
 ## Contrôles
 ### Boutons
 - A - Lecture/pause
@@ -84,8 +82,6 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 
 PLEASE NOTE ! That in TWiLight Menu++ mode, the number of files in a directory is limited to the maximum supported by the DS (40 files in a single directory – or, to be precise, 39 files plus the ‘RETURN’ directory).  
 In standalone mode, my code limits the number of files in a single directory to 512.  
-
-  Update currently being trialled
 
 ## Controls
 ### Buttons
