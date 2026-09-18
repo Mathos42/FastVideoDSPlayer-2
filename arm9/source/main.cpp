@@ -100,7 +100,7 @@ static bool loadAndStartVideo(const char* path)
     if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
     {
         fv_destroyPlayer(&sPlayer);
-        return false;
+        return false; // Échec du chargement
     }
 
     sPlayerController = new PlayerController(&sPlayer);
@@ -132,12 +132,11 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
-// Variables pour scanner la SD de façon optimisée
 #define MAX_DIR_STACK 256
 static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
-static int sDirDepth[MAX_DIR_STACK]; // Stocke la profondeur du dossier
+static int sDirDepth[MAX_DIR_STACK]; 
 static fv_listdir_req_t sListReq ALIGN(32);
-static fv_dir_entry_t sListEntries[512] ALIGN(32);
+static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
 static void switchToRandomVideoAll()
 {
@@ -149,10 +148,13 @@ static void switchToRandomVideoAll()
         fv_destroyPlayer(&sPlayer);
     }
     
-    // Temps de repos pour la carte SD (fermeture de fichier)
-    for (int i = 0; i < 15; i++) {
-        swiWaitForVBlank();
+    // SÉCURITÉ IPC : On vide les anciens messages bloqués pour éviter une désynchronisation
+    while (fifoCheckValue32(FIFO_USER_02)) {
+        fifoGetValue32(FIFO_USER_02);
     }
+    
+    // Petite pause pour laisser la SD fermer proprement le fichier vidéo
+    for (int i = 0; i < 10; i++) swiWaitForVBlank();
     
     consoleClear();
     printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
@@ -164,14 +166,20 @@ static void switchToRandomVideoAll()
     
     int stackTop = 0;
     strncpy(sDirStack[stackTop], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
-    sDirDepth[stackTop] = 0; // Profondeur 0 (Racine)
+    sDirDepth[stackTop] = 0; 
     stackTop++;
     
     u32 seed = GetDebounceTicks() ^ 0x13579BDF;
+    
+    // LA SÉCURITÉ ULTIME DSi : Limiter le nombre de dossiers scannés à 60 maximum.
+    // Cela garantit que la recherche dure moins d'1 seconde et empêche le watchdog de redémarrer la console.
+    int maxFoldersToScan = 60; 
 
-    while (stackTop > 0) {
+    while (stackTop > 0 && maxFoldersToScan > 0) {
         
+        maxFoldersToScan--;
         stackTop--;
+        
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[stackTop], FV_MAX_PATH_LEN - 1);
         currentDir[FV_MAX_PATH_LEN - 1] = '\0';
@@ -180,14 +188,14 @@ static void switchToRandomVideoAll()
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
         sListReq.entries = sListEntries;
-        sListReq.maxEntries = 512; 
+        sListReq.maxEntries = 256; 
         
         DC_FlushRange(&sListReq, sizeof(sListReq));
         DC_FlushRange(sListEntries, sizeof(sListEntries));
         
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
         
-        // Attente asynchrone (Yield) pour ne pas bloquer l'ARM9 et nds-bootstrap
+        // Attente asynchrone (Yield) pour nourrir le système
         while (!fifoCheckValue32(FIFO_USER_02)) {
             swiWaitForVBlank(); 
         }
@@ -202,7 +210,7 @@ static void switchToRandomVideoAll()
         for (u32 i = 0; i < sListReq.count; i++) {
             const char* dName = sListEntries[i].name;
             
-            // EXCLUSIONS : Ignorer les dossiers systèmes et très lourds
+            // Exclusions des dossiers non pertinents
             if (dName[0] == '.') continue;
             if (strcasecmp(dName, "System Volume Information") == 0) continue;
             if (strcasecmp(dName, "_nds") == 0) continue;
@@ -223,7 +231,6 @@ static void switchToRandomVideoAll()
             strcat(fullPath, dName);
             
             if (sListEntries[i].isDir) {
-                // OPTIMISATION : On ne descend pas à plus de 3 dossiers de profondeur
                 if (stackTop < MAX_DIR_STACK && currentDepth < 3) {
                     strncpy(sDirStack[stackTop], fullPath, FV_MAX_PATH_LEN - 1);
                     sDirDepth[stackTop] = currentDepth + 1;
@@ -232,14 +239,11 @@ static void switchToRandomVideoAll()
             } else {
                 if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
                     if (strcasecmp(fullPath, sCurPath) == 0) continue; 
-                    
                     if (IsInHistory(fullPath)) continue;
                     
                     count++;
                     seed = (1103515245 * seed + 12345);
-                    u32 randVal = (seed >> 16) % count;
-                    
-                    if (randVal == 0) {
+                    if (((seed >> 16) % count) == 0) {
                         strncpy(selectedPath, fullPath, FV_MAX_PATH_LEN - 1);
                         selectedPath[FV_MAX_PATH_LEN - 1] = '\0';
                     }
@@ -248,13 +252,17 @@ static void switchToRandomVideoAll()
         }
     }
     
-    // CORRECTION : On EFFACE le texte avant de recharger l'interface vidéo !
     consoleClear();
     
+    bool loadSuccess = false;
+    
     if (count > 0 && selectedPath[0] != '\0') {
-        loadAndStartVideo(selectedPath);
-    } else {
-        if (count == 0) sHistoryCount = 0;
+        loadSuccess = loadAndStartVideo(selectedPath);
+    } 
+    
+    // SÉCURITÉ DE SECOURS : Si le fichier trouvé échoue à charger, on relance l'ancienne vidéo
+    if (!loadSuccess) {
+        if (count == 0) sHistoryCount = 0; // Vide l'historique s'il est plein
         if (sCurPath[0]) loadAndStartVideo(sCurPath);
     }
 }
