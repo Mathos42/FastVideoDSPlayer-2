@@ -10,7 +10,6 @@
 #define IPC_CMD_FIND_PREV_FILE        8
 #define IPC_CMD_FIND_RANDOM_FILE      9
 #define IPC_CMD_LIST_DIR              10
-#define IPC_CMD_FIND_RANDOM_FILE_ALL  11
 #define IPC_CMD_SETUP_DLDI            13
 #define IPC_CMD_HANDSHAKE             15
 
