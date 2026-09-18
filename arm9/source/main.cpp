@@ -31,7 +31,7 @@ static bool sStandalone = false;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
 
-// --- GESTION DE L'HISTORIQUE (Pour éviter les répétitions) ---
+// --- GESTION DE L'HISTORIQUE ---
 #define HISTORY_SIZE 20
 static char sHistory[HISTORY_SIZE][FV_MAX_PATH_LEN];
 static int sHistoryCount = 0;
@@ -50,7 +50,7 @@ static bool IsInHistory(const char* path) {
     }
     return false;
 }
-// -------------------------------------------------------------
+// --------------------------------
 
 u32 GetDebounceTicks();
 
@@ -95,7 +95,6 @@ static bool loadAndStartVideo(const char* path)
     strncpy(sCurPath, path, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
 
-    // Ajout à l'historique pour ne plus la repiocher de suite
     AddToHistory(sCurPath);
 
     if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
@@ -133,13 +132,11 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
-// Variables pour scanner la SD
 #define MAX_DIR_STACK 256
 static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
 static fv_listdir_req_t sListReq ALIGN(32);
 static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
-// Nouvelle fonction qui scanne TOUTE la carte SD
 static void switchToRandomVideoAll()
 {
     if (sPlayerController)
@@ -150,8 +147,7 @@ static void switchToRandomVideoAll()
         fv_destroyPlayer(&sPlayer);
     }
     
-    // CRITIQUE : Laisser à la carte SD le temps de fermer le fichier physiquement
-    // pour éviter le crash / retour TWiLight Menu++ (environ 250ms).
+    // Temps de repos pour la carte SD
     for (int i = 0; i < 15; i++) {
         swiWaitForVBlank();
     }
@@ -167,14 +163,9 @@ static void switchToRandomVideoAll()
     int stackTop = 0;
     strncpy(sDirStack[stackTop++], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
     
-    // Graine aléatoire unique basée sur le temps
     u32 seed = GetDebounceTicks() ^ 0x13579BDF;
 
     while (stackTop > 0) {
-        
-        // Anti-watchdog pour DSi (laisse respirer la console)
-        swiWaitForVBlank();
-
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[--stackTop], FV_MAX_PATH_LEN - 1);
         currentDir[FV_MAX_PATH_LEN - 1] = '\0';
@@ -189,6 +180,7 @@ static void switchToRandomVideoAll()
         
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
         
+        // Attente asynchrone (Yield) pour ne pas bloquer l'ARM9 et nds-bootstrap
         while (!fifoCheckValue32(FIFO_USER_02)) {
             swiWaitForVBlank(); 
         }
@@ -201,9 +193,12 @@ static void switchToRandomVideoAll()
         if (!ok) continue;
         
         for (u32 i = 0; i < sListReq.count; i++) {
+            // Ignorer les dossiers systèmes et les dossiers TRES LOURDS des 3DS/DSi
             if (sListEntries[i].name[0] == '.') continue;
             if (strcasecmp(sListEntries[i].name, "System Volume Information") == 0) continue;
             if (strcasecmp(sListEntries[i].name, "_nds") == 0) continue;
+            if (strcasecmp(sListEntries[i].name, "Nintendo 3DS") == 0) continue;
+            if (strcasecmp(sListEntries[i].name, "Nintendo DSi") == 0) continue;
             
             char fullPath[FV_MAX_PATH_LEN];
             int dirLen = strlen(currentDir);
@@ -223,11 +218,9 @@ static void switchToRandomVideoAll()
                 if (nameLen > 3 && strcasecmp(sListEntries[i].name + nameLen - 3, ".fv") == 0) {
                     if (strcasecmp(fullPath, sCurPath) == 0) continue; 
                     
-                    // On empêche de rejouer l'une des 20 dernières vidéos !
                     if (IsInHistory(fullPath)) continue;
                     
                     count++;
-                    // Génération aléatoire robuste
                     seed = (1103515245 * seed + 12345);
                     u32 randVal = (seed >> 16) % count;
                     
@@ -243,8 +236,7 @@ static void switchToRandomVideoAll()
     if (count > 0 && selectedPath[0] != '\0') {
         loadAndStartVideo(selectedPath);
     } else {
-        // Si on a vu toutes les vidéos de la SD (ou que tout est dans l'historique)
-        if (count == 0) sHistoryCount = 0; // On vide l'historique pour pouvoir repiocher
+        if (count == 0) sHistoryCount = 0;
         if (sCurPath[0]) loadAndStartVideo(sCurPath);
     }
 }
@@ -378,7 +370,8 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
                 break;
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
-                if (sStandalone) {
+                // MODIFICATION : On limite le mode 2 aux consoles DSi/3DS lancées via TWLM++
+                if (sStandalone || !isDSiMode()) {
                     sRandomMode = (sRandomMode == 0) ? 1 : 0;
                 } else {
                     sRandomMode++;
