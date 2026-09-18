@@ -132,10 +132,12 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
+// Variables pour scanner la SD de façon optimisée
 #define MAX_DIR_STACK 256
 static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
+static int sDirDepth[MAX_DIR_STACK]; // Stocke la profondeur du dossier
 static fv_listdir_req_t sListReq ALIGN(32);
-static fv_dir_entry_t sListEntries[256] ALIGN(32);
+static fv_dir_entry_t sListEntries[512] ALIGN(32);
 
 static void switchToRandomVideoAll()
 {
@@ -147,7 +149,7 @@ static void switchToRandomVideoAll()
         fv_destroyPlayer(&sPlayer);
     }
     
-    // Temps de repos pour la carte SD
+    // Temps de repos pour la carte SD (fermeture de fichier)
     for (int i = 0; i < 15; i++) {
         swiWaitForVBlank();
     }
@@ -161,19 +163,24 @@ static void switchToRandomVideoAll()
     selectedPath[0] = '\0';
     
     int stackTop = 0;
-    strncpy(sDirStack[stackTop++], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    strncpy(sDirStack[stackTop], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    sDirDepth[stackTop] = 0; // Profondeur 0 (Racine)
+    stackTop++;
     
     u32 seed = GetDebounceTicks() ^ 0x13579BDF;
 
     while (stackTop > 0) {
+        
+        stackTop--;
         char currentDir[FV_MAX_PATH_LEN];
-        strncpy(currentDir, sDirStack[--stackTop], FV_MAX_PATH_LEN - 1);
+        strncpy(currentDir, sDirStack[stackTop], FV_MAX_PATH_LEN - 1);
         currentDir[FV_MAX_PATH_LEN - 1] = '\0';
+        int currentDepth = sDirDepth[stackTop];
         
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
         sListReq.entries = sListEntries;
-        sListReq.maxEntries = 256; 
+        sListReq.maxEntries = 512; 
         
         DC_FlushRange(&sListReq, sizeof(sListReq));
         DC_FlushRange(sListEntries, sizeof(sListEntries));
@@ -193,29 +200,37 @@ static void switchToRandomVideoAll()
         if (!ok) continue;
         
         for (u32 i = 0; i < sListReq.count; i++) {
-            // Ignorer les dossiers systèmes et les dossiers TRES LOURDS des 3DS/DSi
-            if (sListEntries[i].name[0] == '.') continue;
-            if (strcasecmp(sListEntries[i].name, "System Volume Information") == 0) continue;
-            if (strcasecmp(sListEntries[i].name, "_nds") == 0) continue;
-            if (strcasecmp(sListEntries[i].name, "Nintendo 3DS") == 0) continue;
-            if (strcasecmp(sListEntries[i].name, "Nintendo DSi") == 0) continue;
+            const char* dName = sListEntries[i].name;
+            
+            // EXCLUSIONS : Ignorer les dossiers systèmes et très lourds
+            if (dName[0] == '.') continue;
+            if (strcasecmp(dName, "System Volume Information") == 0) continue;
+            if (strcasecmp(dName, "_nds") == 0) continue;
+            if (strcasecmp(dName, "Nintendo 3DS") == 0) continue;
+            if (strcasecmp(dName, "Nintendo DSi") == 0) continue;
+            if (strcasecmp(dName, "TWiLightMenu") == 0) continue;
+            if (strcasecmp(dName, "luma") == 0) continue;
+            if (strcasecmp(dName, "DCIM") == 0) continue;
             
             char fullPath[FV_MAX_PATH_LEN];
             int dirLen = strlen(currentDir);
-            int nameLen = strlen(sListEntries[i].name);
+            int nameLen = strlen(dName);
             
             if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
             
             strcpy(fullPath, currentDir);
             if (dirLen > 0 && fullPath[dirLen - 1] != '/') strcat(fullPath, "/");
-            strcat(fullPath, sListEntries[i].name);
+            strcat(fullPath, dName);
             
             if (sListEntries[i].isDir) {
-                if (stackTop < MAX_DIR_STACK) {
-                    strncpy(sDirStack[stackTop++], fullPath, FV_MAX_PATH_LEN - 1);
+                // OPTIMISATION : On ne descend pas à plus de 3 dossiers de profondeur
+                if (stackTop < MAX_DIR_STACK && currentDepth < 3) {
+                    strncpy(sDirStack[stackTop], fullPath, FV_MAX_PATH_LEN - 1);
+                    sDirDepth[stackTop] = currentDepth + 1;
+                    stackTop++;
                 }
             } else {
-                if (nameLen > 3 && strcasecmp(sListEntries[i].name + nameLen - 3, ".fv") == 0) {
+                if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
                     if (strcasecmp(fullPath, sCurPath) == 0) continue; 
                     
                     if (IsInHistory(fullPath)) continue;
@@ -232,6 +247,9 @@ static void switchToRandomVideoAll()
             }
         }
     }
+    
+    // CORRECTION : On EFFACE le texte avant de recharger l'interface vidéo !
+    consoleClear();
     
     if (count > 0 && selectedPath[0] != '\0') {
         loadAndStartVideo(selectedPath);
@@ -370,7 +388,6 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
                 break;
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
-                // MODIFICATION : On limite le mode 2 aux consoles DSi/3DS lancées via TWLM++
                 if (sStandalone || !isDSiMode()) {
                     sRandomMode = (sRandomMode == 0) ? 1 : 0;
                 } else {
