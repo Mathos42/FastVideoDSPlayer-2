@@ -328,7 +328,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
     if (!browser.OpenDir(sBrowserDir))
         return 0;
 
-    browser.SetModes(sLoopEnabled, sRandomMode > 0);
+    browser.SetModes(sLoopEnabled, sRandomMode);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -360,12 +360,12 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
 
             case BrowserController::ACT_TOGGLE_LOOP:
                 sLoopEnabled = !sLoopEnabled;
-                browser.SetModes(sLoopEnabled, sRandomMode > 0);
+                browser.SetModes(sLoopEnabled, sRandomMode);
                 break;
 
             case BrowserController::ACT_TOGGLE_RANDOM:
                 sRandomMode = (sRandomMode == 0) ? 1 : 0; 
-                browser.SetModes(sLoopEnabled, sRandomMode > 0);
+                browser.SetModes(sLoopEnabled, sRandomMode);
                 break;
 
             default:
