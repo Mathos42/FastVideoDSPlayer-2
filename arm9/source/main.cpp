@@ -171,10 +171,16 @@ static void switchToRandomVideoAll()
     char selectedPath[FV_MAX_PATH_LEN];
     selectedPath[0] = '\0';
     
-    int stackTop = 0;
-    strncpy(sDirStack[stackTop], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
-    sDirDepth[stackTop] = 0; 
-    stackTop++;
+    // File (FIFO) et non pile : un parcours en largeur (BFS) répartit le
+    // budget de maxFoldersToScan sur les dossiers de premier niveau avant de
+    // plonger dans une sous-arborescence, au lieu de s'enfoncer dans la
+    // dernière branche listée et de ne (presque) jamais revenir aux dossiers
+    // frères. queueHead/queueTail indexent le même tableau sDirStack.
+    int queueHead = 0;
+    int queueTail = 0;
+    strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    sDirDepth[queueTail] = 0;
+    queueTail++;
     
     u32 seed = GetDebounceTicks() ^ 0x13579BDF;
     
@@ -182,15 +188,15 @@ static void switchToRandomVideoAll()
     // Cela garantit que la recherche dure moins d'1 seconde et empêche le watchdog de redémarrer la console.
     int maxFoldersToScan = 60; 
 
-    while (stackTop > 0 && maxFoldersToScan > 0) {
+    while (queueHead < queueTail && maxFoldersToScan > 0) {
         
         maxFoldersToScan--;
-        stackTop--;
         
         char currentDir[FV_MAX_PATH_LEN];
-        strncpy(currentDir, sDirStack[stackTop], FV_MAX_PATH_LEN - 1);
+        strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
         currentDir[FV_MAX_PATH_LEN - 1] = '\0';
-        int currentDepth = sDirDepth[stackTop];
+        int currentDepth = sDirDepth[queueHead];
+        queueHead++;
         
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
@@ -238,10 +244,10 @@ static void switchToRandomVideoAll()
             strcat(fullPath, dName);
             
             if (sListEntries[i].isDir) {
-                if (stackTop < MAX_DIR_STACK && currentDepth < 3) {
-                    strncpy(sDirStack[stackTop], fullPath, FV_MAX_PATH_LEN - 1);
-                    sDirDepth[stackTop] = currentDepth + 1;
-                    stackTop++;
+                if (queueTail < MAX_DIR_STACK && currentDepth < 3) {
+                    strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
+                    sDirDepth[queueTail] = currentDepth + 1;
+                    queueTail++;
                 }
             } else {
                 if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
