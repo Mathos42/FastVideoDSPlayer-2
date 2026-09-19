@@ -60,7 +60,7 @@ static bool RequestListDir(const char* path)
 BrowserController::BrowserController()
     : _inputRepeater(KEY_UP | KEY_DOWN, 12, 3),
       _entries(sEntries), _count(0), _total(0), _cursor(0), _topLine(0), _dirty(true),
-      _loopEnabled(false), _randomEnabled(false)
+      _loopEnabled(false), _randomMode(0)
 {
     _view.Initialize();
     _curDir[0] = 0;
@@ -68,15 +68,15 @@ BrowserController::BrowserController()
 }
 
 // SetModes() was declared but never defined nor called: _loopEnabled/
-// _randomEnabled were left uninitialized (now fixed above) and START/SELECT
+// _randomMode were left uninitialized (now fixed above) and START/SELECT
 // did nothing in the browser. See main.cpp's RunBrowser() for the wiring
 // that actually calls this now.
-void BrowserController::SetModes(bool loopEnabled, bool randomEnabled)
+void BrowserController::SetModes(bool loopEnabled, int randomMode)
 {
-    if (loopEnabled == _loopEnabled && randomEnabled == _randomEnabled)
+    if (loopEnabled == _loopEnabled && randomMode == _randomMode)
         return;
     _loopEnabled = loopEnabled;
-    _randomEnabled = randomEnabled;
+    _randomMode = randomMode;
     _dirty = true;
     RenderIfNeeded();
 }
@@ -139,7 +139,7 @@ void BrowserController::RenderIfNeeded()
 {
     if (!_dirty)
         return;
-    _view.Render(_curDir, _entries, _count, _total, _cursor, _topLine, _loopEnabled, _randomEnabled);
+    _view.Render(_curDir, _entries, _count, _total, _cursor, _topLine, _loopEnabled, _randomMode);
     _dirty = false;
 }
 
