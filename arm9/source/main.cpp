@@ -166,6 +166,17 @@ static void switchToRandomVideoAll()
     // Petite pause pour laisser la SD fermer proprement le fichier vidéo
     for (int i = 0; i < 10; i++) swiWaitForVBlank();
     
+    // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
+    // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
+    // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran "Recherche
+    // de vidéos..." s'afficherait par-dessus/mélangé à ces résidus, exactement le
+    // problème que BrowserView::Initialize() évite déjà avant d'afficher la liste
+    // de fichiers (mêmes paramètres consoleInit qu'au boot).
+    oamClear(&oamSub, 0, 128);
+    REG_DISPCNT_SUB = MODE_0_2D;
+    consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
+    REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
+
     consoleClear();
     printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
     swiWaitForVBlank();
