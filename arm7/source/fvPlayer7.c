@@ -17,12 +17,19 @@
 static fv_player7_t sPlayer;
 extern volatile u32 gFrameCounter; // défini dans main.c, incrémenté à chaque VBlank
 
-static void handleFindFile(u32 value, void *userdata);
+static void handleFindFile(u32 value);
 
 void fv_init(void)
 {
     memset(&sPlayer, 0, sizeof(sPlayer));
-    fifoSetValue32Handler(FIFO_USER_02, handleFindFile, NULL);
+    // FIFO_USER_02 (next/prev/random/list_dir) n'est PAS enregistré via
+    // fifoSetValue32Handler : comme FIFO_USER_01 plus bas, il est dépilé en
+    // polling depuis fv_main(), pas depuis un callback appelé en contexte
+    // IRQ. IPC_CMD_LIST_DIR peut être appelé en rafale (jusqu'à 60 fois de
+    // suite par "ALEA ON ALL"), et chaque appel bloque le temps du listing
+    // FatFs ; en callback ISR ça geler les IRQ (VBlank/audio/input) pendant
+    // toute la boucle, en polling le VBlank/l'IRQ audio peuvent s'intercaler
+    // normalement entre deux commandes.
 }
 
 static inline int getAudioTimerValue(int rate)
@@ -414,7 +421,7 @@ static bool findRandomFvFile(char *outPath)
     return found;
 }
 
-static void handleFindFile(u32 value, void *userdata)
+static void handleFindFile(u32 value)
 {
     switch (value >> IPC_CMD_CMD_SHIFT) {
         case IPC_CMD_FIND_NEXT_FILE: {
@@ -550,9 +557,11 @@ static void handleFifo(u32 value)
 
 void fv_main(void)
 {
-    if (!fifoCheckValue32(FIFO_USER_01))
+    if (!fifoCheckValue32(FIFO_USER_01) && !fifoCheckValue32(FIFO_USER_02))
         irq_wait(false, IRQ_TIMER2 | IRQ_FIFO_NOT_EMPTY);
     updateAudio();
     if (fifoCheckValue32(FIFO_USER_01))
         handleFifo(fifoGetValue32(FIFO_USER_01));
+    if (fifoCheckValue32(FIFO_USER_02))
+        handleFindFile(fifoGetValue32(FIFO_USER_02));
 }
