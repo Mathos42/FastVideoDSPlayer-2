@@ -74,7 +74,10 @@ static void ShowVideoMessage()
 
     char line2[32];
     const char* randomStateStr;
-    if (sRandomMode == 2) randomStateStr = "ON ALL";
+    // "ALL" et non "ON ALL" : les 3 états doivent tenir sur 3 caractères
+    // pour que le pire cas ("ALEA:xxx  BOUCLE:OFF") reste <= MAX_MSG_CHARS
+    // (20, voir PlayerView.h) et ne soit pas tronqué par RenderTextLine.
+    if (sRandomMode == 2) randomStateStr = "ALL";
     else if (sRandomMode == 1) randomStateStr = "ON ";
     else randomStateStr = "OFF";
 
