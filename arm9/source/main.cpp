@@ -140,6 +140,13 @@ static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
 static void switchToRandomVideoAll()
 {
+    // Sauvegarde AVANT loadAndStartVideo(), qui écrase sCurPath dès l'appel
+    // (avant même de savoir si le chargement réussit). Sans ça, le filet de
+    // sécurité plus bas rejoue le fichier en échec au lieu de l'ancienne vidéo.
+    char prevPath[FV_MAX_PATH_LEN];
+    strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
+    prevPath[FV_MAX_PATH_LEN - 1] = '\0';
+
     if (sPlayerController)
     {
         fv_pausePlayer(&sPlayer);
@@ -263,7 +270,7 @@ static void switchToRandomVideoAll()
     // SÉCURITÉ DE SECOURS : Si le fichier trouvé échoue à charger, on relance l'ancienne vidéo
     if (!loadSuccess) {
         if (count == 0) sHistoryCount = 0; // Vide l'historique s'il est plein
-        if (sCurPath[0]) loadAndStartVideo(sCurPath);
+        if (prevPath[0]) loadAndStartVideo(prevPath);
     }
 }
 
