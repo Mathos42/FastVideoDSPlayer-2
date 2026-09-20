@@ -192,7 +192,7 @@ void PlayerController::UpdateKeys()
         _lastNavActionVBlank[1] = now;
         return;
     }
-    if (!selectDebounced && _inputProvider.Triggered(KEY_SELECT))
+    if (!selectDebounced && _inputProvider.Triggered(KEY_START))
     {
         // --- LOGIQUE HAUT + SELECT POUR INVERSER LES ECRANS ---
         if (_inputProvider.Current(KEY_UP)) 
@@ -283,7 +283,7 @@ void PlayerController::UpdateDim()
     // (loop/random confirmation toast). Navigation keys (D-pad, L/R/X/Y) and
     // automatic video chaining must NOT wake it: the screen stays dark.
     if ((!_playing && !_videoEnded) || _inputProvider.Triggered(KEY_TOUCH) ||
-        _inputProvider.Triggered(KEY_START) || _inputProvider.Triggered(KEY_SELECT))
+        _inputProvider.Triggered(KEY_START) || _inputProvider.Triggered(KEY_START))
     {
         _subScreenState = SUB_SCREEN_STATE_ACTIVE;
         _subScreenStateCounter = 0;
