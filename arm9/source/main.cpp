@@ -77,6 +77,9 @@ static void ShowVideoMessage()
 
     char line2[32];
     const char* randomStateStr;
+    // "ALL" et non "ON ALL" : les 3 états doivent tenir sur 3 caractères
+    // pour que le pire cas ("ALEA:xxx  BOUCLE:OFF") reste <= MAX_MSG_CHARS
+    // (20, voir PlayerView.h) et ne soit pas tronqué par RenderTextLine.
     if (sRandomMode == 2) randomStateStr = "ALL";
     else if (sRandomMode == 1) randomStateStr = "ON ";
     else randomStateStr = "OFF";
@@ -103,7 +106,7 @@ static bool loadAndStartVideo(const char* path)
     if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
     {
         fv_destroyPlayer(&sPlayer);
-        return false;
+        return false; // Échec du chargement
     }
 
     sPlayerController = new PlayerController(&sPlayer);
@@ -143,6 +146,13 @@ static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
 static void switchToRandomVideoAll()
 {
+    // Sauvegarde AVANT loadAndStartVideo(), qui écrase sCurPath dès l'appel
+    // (avant même de savoir si le chargement réussit). Sans ça, le filet de
+    // sécurité plus bas rejoue le fichier en échec au lieu de l'ancienne vidéo.
+    char prevPath[FV_MAX_PATH_LEN];
+    strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
+    prevPath[FV_MAX_PATH_LEN - 1] = '\0';
+
     if (sPlayerController)
     {
         fv_pausePlayer(&sPlayer);
@@ -151,12 +161,25 @@ static void switchToRandomVideoAll()
         fv_destroyPlayer(&sPlayer);
     }
     
+    // SÉCURITÉ IPC : On vide les anciens messages bloqués pour éviter une désynchronisation
     while (fifoCheckValue32(FIFO_USER_02)) {
         fifoGetValue32(FIFO_USER_02);
     }
     
+    // Petite pause pour laisser la SD fermer proprement le fichier vidéo
     for (int i = 0; i < 10; i++) swiWaitForVBlank();
     
+    // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
+    // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
+    // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran "Recherche
+    // de vidéos..." s'afficherait par-dessus/mélangé à ces résidus, exactement le
+    // problème que BrowserView::Initialize() évite déjà avant d'afficher la liste
+    // de fichiers (mêmes paramètres consoleInit qu'au boot).
+    oamClear(&oamSub, 0, 128);
+    REG_DISPCNT_SUB = MODE_0_2D;
+    consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
+    REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
+
     consoleClear();
     printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
     swiWaitForVBlank();
@@ -165,23 +188,32 @@ static void switchToRandomVideoAll()
     char selectedPath[FV_MAX_PATH_LEN];
     selectedPath[0] = '\0';
     
-    int stackTop = 0;
-    strncpy(sDirStack[stackTop], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
-    sDirDepth[stackTop] = 0; 
-    stackTop++;
+    // File (FIFO) et non pile : un parcours en largeur (BFS) répartit le
+    // budget de maxFoldersToScan sur les dossiers de premier niveau avant de
+    // plonger dans une sous-arborescence, au lieu de s'enfoncer dans la
+    // dernière branche listée et de ne (presque) jamais revenir aux dossiers
+    // frères. queueHead/queueTail indexent le même tableau sDirStack.
+    int queueHead = 0;
+    int queueTail = 0;
+    strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    sDirDepth[queueTail] = 0;
+    queueTail++;
     
     u32 seed = GetDebounceTicks() ^ 0x13579BDF;
+    
+    // LA SÉCURITÉ ULTIME DSi : Limiter le nombre de dossiers scannés à 60 maximum.
+    // Cela garantit que la recherche dure moins d'1 seconde et empêche le watchdog de redémarrer la console.
     int maxFoldersToScan = 60; 
 
-    while (stackTop > 0 && maxFoldersToScan > 0) {
+    while (queueHead < queueTail && maxFoldersToScan > 0) {
         
         maxFoldersToScan--;
-        stackTop--;
         
         char currentDir[FV_MAX_PATH_LEN];
-        strncpy(currentDir, sDirStack[stackTop], FV_MAX_PATH_LEN - 1);
+        strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
         currentDir[FV_MAX_PATH_LEN - 1] = '\0';
-        int currentDepth = sDirDepth[stackTop];
+        int currentDepth = sDirDepth[queueHead];
+        queueHead++;
         
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
         sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
@@ -193,6 +225,7 @@ static void switchToRandomVideoAll()
         
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
         
+        // Attente asynchrone (Yield) pour nourrir le système
         while (!fifoCheckValue32(FIFO_USER_02)) {
             swiWaitForVBlank(); 
         }
@@ -207,6 +240,7 @@ static void switchToRandomVideoAll()
         for (u32 i = 0; i < sListReq.count; i++) {
             const char* dName = sListEntries[i].name;
             
+            // Exclusions des dossiers non pertinents
             if (dName[0] == '.') continue;
             if (strcasecmp(dName, "System Volume Information") == 0) continue;
             if (strcasecmp(dName, "_nds") == 0) continue;
@@ -227,10 +261,10 @@ static void switchToRandomVideoAll()
             strcat(fullPath, dName);
             
             if (sListEntries[i].isDir) {
-                if (stackTop < MAX_DIR_STACK && currentDepth < 3) {
-                    strncpy(sDirStack[stackTop], fullPath, FV_MAX_PATH_LEN - 1);
-                    sDirDepth[stackTop] = currentDepth + 1;
-                    stackTop++;
+                if (queueTail < MAX_DIR_STACK && currentDepth < 3) {
+                    strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
+                    sDirDepth[queueTail] = currentDepth + 1;
+                    queueTail++;
                 }
             } else {
                 if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
@@ -256,9 +290,10 @@ static void switchToRandomVideoAll()
         loadSuccess = loadAndStartVideo(selectedPath);
     } 
     
+    // SÉCURITÉ DE SECOURS : Si le fichier trouvé échoue à charger, on relance l'ancienne vidéo
     if (!loadSuccess) {
-        if (count == 0) sHistoryCount = 0; 
-        if (sCurPath[0]) loadAndStartVideo(sCurPath);
+        if (count == 0) sHistoryCount = 0; // Vide l'historique s'il est plein
+        if (prevPath[0]) loadAndStartVideo(prevPath);
     }
 }
 
@@ -315,7 +350,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
     if (!browser.OpenDir(sBrowserDir))
         return 0;
 
-    browser.SetModes(sLoopEnabled, sRandomMode > 0);
+    browser.SetModes(sLoopEnabled, sRandomMode);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -347,12 +382,12 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
 
             case BrowserController::ACT_TOGGLE_LOOP:
                 sLoopEnabled = !sLoopEnabled;
-                browser.SetModes(sLoopEnabled, sRandomMode > 0);
+                browser.SetModes(sLoopEnabled, sRandomMode);
                 break;
 
             case BrowserController::ACT_TOGGLE_RANDOM:
                 sRandomMode = (sRandomMode == 0) ? 1 : 0; 
-                browser.SetModes(sLoopEnabled, sRandomMode > 0);
+                browser.SetModes(sLoopEnabled, sRandomMode);
                 break;
 
             default:
