@@ -1,5 +1,7 @@
 FastVideoDSPlayer 2
 ===================
+> **Licence** : ce dépôt est un fork de [Gericom/FastVideoDSPlayer](https://github.com/Gericom/FastVideoDSPlayer), publié sans licence explicite (code d'origine : tous droits réservés). La licence [zlib](LICENSE) de ce dépôt ne couvre que mes propres modifications et ajouts (anti-rebond, boucle/aléatoire, mode aléatoire sur toute la carte SD, corrections diverses), pas le code original de Gericom.
+
 Lecteur pour le format FastVideoDS.  
 Sur votre carte SD avec TWiLight Menu++ d'installé, mettre le fichier FastVideoDS.nds dans "_nds\apps" puis lancez vos vidéos.  
 
@@ -39,7 +41,7 @@ En mode autonome mon code limite à 512 fichiers dans un seul et même répertoi
 - B - Retour à la liste des vidéos
 - START - Activer/Désactiver la lecture en boucle de la piste
 - SELECT - Activer/Désactiver la lecture aléatoire
-- Croix Haut + START : les 2 écrans s'inversent  
+- Croix Haut + SELECT : les 2 écrans s'inversent  
 
 ### Toucher
 L'écran tactile permet de lancer ou de mettre en pause la vidéo, ainsi que de se déplacer dans la vidéo en appuyant ou en faisant glisser la barre de défilement.
@@ -57,6 +59,8 @@ Encoder tout un répertoire de vidéos : https://www.hiraven.com/FastVideoDS/Enc
 --------------------------------------------------------------------------------------
 FastVideoDSPlayer 2
 ===================
+> **License**: this repository is a fork of [Gericom/FastVideoDSPlayer](https://github.com/Gericom/FastVideoDSPlayer), published without an explicit license (original code: all rights reserved). This repository's [zlib license](LICENSE) covers only my own modifications and additions (debounce fix, loop/shuffle, whole-SD-card shuffle mode, various fixes), not Gericom's original code.
+
 A player for the FastVideoDS format.  
 On your SD card with TWiLight Menu++ installed, place the FastVideoDS.nds file in the ‘_nds\apps’ folder, then play your videos.  
 
@@ -96,7 +100,7 @@ In standalone mode, my code limits the number of files in a single directory to 
 - B – Return to the video list
 - START - Turn track repeat on/off
 - SELECT - Turn shuffle on/off
-- Up Arrow + START: the two screens swap places  
+- Up Arrow + SELECT: the two screens swap places  
 
 ### Touch
 The touchscreen allows you to play or pause the video, as well as navigate through it by tapping or dragging the scroll bar.
