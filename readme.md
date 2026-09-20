@@ -24,6 +24,7 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Affichage des dossiers, choix de la vidéo à regarder (en mode autonome).
 - Y X L R SELECT et START fonctionnent également en mode autonome.
 - L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas (dans les 2 modes, TWiLight Menu++ et autonome).
+- En mode TWiLight Menu++ vu que les dossiers sont limiés à 39 fichiers, j'ai rajouter un mode aléatoire sur tous les dossiers de la carte SD  
 
 ATTENTION ! En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (40 fichiers dans un même répertoire, plus exactement 39 fichiers + le répertoire RETOUR).  
 En mode autonome mon code limite à 512 fichiers dans un seul et même répertoire.  
@@ -38,6 +39,7 @@ En mode autonome mon code limite à 512 fichiers dans un seul et même répertoi
 - B - Retour à la liste des vidéos
 - START - Activer/Désactiver la lecture en boucle de la piste
 - SELECT - Activer/Désactiver la lecture aléatoire
+- Croix Haut + SELECT : les 2 écrans s'inversent  
 
 ### Toucher
 L'écran tactile permet de lancer ou de mettre en pause la vidéo, ainsi que de se déplacer dans la vidéo en appuyant ou en faisant glisser la barre de défilement.
@@ -79,6 +81,7 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 - Displays folders and allows you to select which video to watch (in standalone mode).
 - Y, X, L, R, SELECT and START also work in standalone mode.
 - The bottom screen remains black between videos and when Y, X, L and R are pressed. Tapping the screen, pausing the video or exiting the video restores the bottom screen (in both modes: TWiLight Menu++ and standalone).
+- In TWiLight Menu++ mode, as folders are limited to 39 files, I’ve added a shuffle mode for all folders on the SD card  
 
 PLEASE NOTE ! That in TWiLight Menu++ mode, the number of files in a directory is limited to the maximum supported by the DS (40 files in a single directory – or, to be precise, 39 files plus the ‘RETURN’ directory).  
 In standalone mode, my code limits the number of files in a single directory to 512.  
@@ -93,7 +96,7 @@ In standalone mode, my code limits the number of files in a single directory to 
 - B – Return to the video list
 - START - Turn track repeat on/off
 - SELECT - Turn shuffle on/off
-
+- Up Arrow + SELECT: the two screens swap places  
 
 ### Touch
 The touchscreen allows you to play or pause the video, as well as navigate through it by tapping or dragging the scroll bar.
