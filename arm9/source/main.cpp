@@ -77,7 +77,7 @@ static void ShowVideoMessage()
 
     char line2[32];
     const char* randomStateStr;
-    if (sRandomMode == 2) randomStateStr = "ON ALL";
+    if (sRandomMode == 2) randomStateStr = "ALL";
     else if (sRandomMode == 1) randomStateStr = "ON ";
     else randomStateStr = "OFF";
 
