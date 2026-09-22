@@ -101,16 +101,19 @@ static bool loadAndStartVideo(const char* path)
         fv_destroyPlayer(&sPlayer);
     }
 
+    // --- CORRECTION MAJEURE ---
+    // On teste l'initialisation AVANT de polluer l'historique et sCurPath.
+    if (!fv_initPlayer(&sPlayer, path, sCanUseWram))
+    {
+        fv_destroyPlayer(&sPlayer);
+        return false; // Échec du chargement : on quitte proprement !
+    }
+
+    // Si on arrive ici, la vidéo est valide et chargée. On peut mettre à jour nos variables.
     strncpy(sCurPath, path, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
 
     AddToHistory(sCurPath);
-
-    if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
-    {
-        fv_destroyPlayer(&sPlayer);
-        return false; // Échec du chargement
-    }
 
     sPlayerController = new PlayerController(&sPlayer);
     sPlayerController->Initialize();
@@ -118,7 +121,6 @@ static bool loadAndStartVideo(const char* path)
     return true;
 }
 
-// CORRECTION CRASH X/Y/L/R : On met en pause la lecture avant de chercher le fichier suivant.
 static void switchToAdjacentVideo(bool next)
 {
     if (sPlayerController) fv_pausePlayer(&sPlayer); // Libère la carte SD
@@ -134,10 +136,17 @@ static void switchToAdjacentVideo(bool next)
     }
 
     DC_InvalidateRange(sAdjacentPath, sizeof(sAdjacentPath));
-    loadAndStartVideo(sAdjacentPath);
+
+    // Sauvegarde en cas d'échec du chargement
+    char prevPath[FV_MAX_PATH_LEN];
+    strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
+    prevPath[FV_MAX_PATH_LEN - 1] = '\0';
+
+    if (!loadAndStartVideo(sAdjacentPath)) {
+        if (prevPath[0]) loadAndStartVideo(prevPath);
+    }
 }
 
-// CORRECTION CRASH X/Y/L/R : On met en pause la lecture avant de chercher.
 static void switchToRandomVideo()
 {
     if (sPlayerController) fv_pausePlayer(&sPlayer); // Libère la carte SD
@@ -152,7 +161,15 @@ static void switchToRandomVideo()
     }
 
     DC_InvalidateRange(sAdjacentPath, sizeof(sAdjacentPath));
-    loadAndStartVideo(sAdjacentPath);
+    
+    // Sauvegarde en cas d'échec du chargement
+    char prevPath[FV_MAX_PATH_LEN];
+    strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
+    prevPath[FV_MAX_PATH_LEN - 1] = '\0';
+
+    if (!loadAndStartVideo(sAdjacentPath)) {
+        if (prevPath[0]) loadAndStartVideo(prevPath);
+    }
 }
 
 // --- GESTION DU CACHE GLOBAL ---
@@ -250,7 +267,8 @@ static void BuildGlobalVideoCache()
                         sGlobalVideoCache[sGlobalVideoCount][FV_MAX_PATH_LEN - 1] = '\0';
                         sGlobalVideoCount++;
 
-                        printf("\x1b[10;1H    %d videos indexees", sGlobalVideoCount);
+                        // Correction Affichage : Des espaces à la fin pour effacer d'éventuels résidus
+                        printf("\x1b[10;1H    %d videos indexees   ", sGlobalVideoCount);
                     }
                 }
             }
@@ -267,15 +285,12 @@ static void switchToRandomVideoAll()
 
     DestroyCurrentPlayer();
 
-    // SÉCURITÉ IPC : On vide les anciens messages bloqués pour éviter une désynchronisation
     while (fifoCheckValue32(FIFO_USER_02)) {
         fifoGetValue32(FIFO_USER_02);
     }
 
-    // Petite pause pour laisser la SD fermer proprement le fichier vidéo
     for (int i = 0; i < 10; i++) swiWaitForVBlank();
 
-    // On prépare l'écran une seule fois au premier lancement
     if (!sGlobalCacheBuilt) {
         oamClear(&oamSub, 0, 128);
         REG_DISPCNT_SUB = MODE_0_2D;
@@ -283,7 +298,11 @@ static void switchToRandomVideoAll()
         REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
 
         consoleClear();
-        printf("\n\n\n\n    Creation de l'index\n    des videos SD...\n\n    Veuillez patienter !\n\n    0 videos indexees");
+        // Correction Affichage : On supprime le "0 videos indexees" en dur ici.
+        printf("\n\n\n\n    Creation de l'index\n    des videos SD...\n\n    Veuillez patienter !");
+        
+        // On initialise le premier "0" à la bonne ligne via les coordonnées
+        printf("\x1b[10;1H    0 videos indexees   ");
         swiWaitForVBlank();
 
         BuildGlobalVideoCache();
@@ -300,31 +319,41 @@ static void switchToRandomVideoAll()
             sShuffleSeedInit = true;
         }
 
-        char selectedPath[FV_MAX_PATH_LEN];
-        selectedPath[0] = '\0';
-        int attempts = 0;
+        // --- NOUVEAU SYSTEME DE RETRY ---
+        int loadAttempts = 0;
+        
+        // On s'autorise jusqu'à 5 tentatives sur 5 vidéos différentes du cache
+        while (!loadSuccess && loadAttempts < 5) {
+            char selectedPath[FV_MAX_PATH_LEN];
+            selectedPath[0] = '\0';
+            int searchAttempts = 0;
 
-        while (attempts < 50) {
-            sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
-            int randIdx = (sShuffleSeed >> 16) % sGlobalVideoCount;
+            while (searchAttempts < 50) {
+                sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
+                int randIdx = (sShuffleSeed >> 16) % sGlobalVideoCount;
 
-            if (strcasecmp(sGlobalVideoCache[randIdx], prevPath) != 0 &&
-                !IsInHistory(sGlobalVideoCache[randIdx])) {
-                strncpy(selectedPath, sGlobalVideoCache[randIdx], FV_MAX_PATH_LEN - 1);
-                selectedPath[FV_MAX_PATH_LEN - 1] = '\0';
-                break;
+                if (strcasecmp(sGlobalVideoCache[randIdx], prevPath) != 0 &&
+                    !IsInHistory(sGlobalVideoCache[randIdx])) {
+                    strncpy(selectedPath, sGlobalVideoCache[randIdx], FV_MAX_PATH_LEN - 1);
+                    selectedPath[FV_MAX_PATH_LEN - 1] = '\0';
+                    break;
+                }
+                searchAttempts++;
             }
-            attempts++;
-        }
 
-        if (selectedPath[0] != '\0') {
-            loadSuccess = loadAndStartVideo(selectedPath);
+            if (selectedPath[0] != '\0') {
+                loadSuccess = loadAndStartVideo(selectedPath);
+            } else {
+                break; // Plus de candidats possibles, on sort de la boucle
+            }
+            
+            loadAttempts++;
         }
     }
 
-    // SÉCURITÉ DE SECOURS : Si le fichier trouvé échoue à charger, on relance l'ancienne vidéo
+    // SÉCURITÉ DE SECOURS : Si AUCUNE des tentatives n'a marché, on restaure la vidéo d'origine
     if (!loadSuccess) {
-        if (sGlobalVideoCount == 0) sHistoryCount = 0; // Vide l'historique s'il est plein
+        if (sGlobalVideoCount == 0) sHistoryCount = 0; 
         if (prevPath[0]) loadAndStartVideo(prevPath);
     }
 }
@@ -372,10 +401,8 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
 
 static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
-    // --- NOUVEAUTÉ : On force les écrans dans le bon sens (vidéo en haut, menu en bas) ---
     gScreenSwapped = false;
     lcdMainOnTop();
-    // -----------------------------------------------------------------------------------
 
     PlayerController::RestoreSubScreen();
     BrowserController browser;
