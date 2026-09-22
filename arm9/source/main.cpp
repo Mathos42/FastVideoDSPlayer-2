@@ -108,16 +108,21 @@ static bool loadAndStartVideo(const char* path)
         fv_destroyPlayer(&sPlayer);
     }
 
-    strncpy(sCurPath, path, sizeof(sCurPath) - 1);
-    sCurPath[sizeof(sCurPath) - 1] = 0;
-
-    AddToHistory(sCurPath);
-
-    if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
+    // sCurPath/l'historique ne sont mis à jour qu'en cas de succès : sinon
+    // un fv_initPlayer en échec pollue sCurPath avec un chemin jamais
+    // réellement joué (et l'ajoute à l'historique), ce qui fausse les
+    // exclusions "vidéo courante"/"déjà vue récemment" ailleurs dans le
+    // fichier - particulièrement sensible en mode ALL où switchToRandomVideoAll()
+    // peut désormais retenter loadAndStartVideo() plusieurs fois d'affilée.
+    if (!fv_initPlayer(&sPlayer, path, sCanUseWram))
     {
         fv_destroyPlayer(&sPlayer);
         return false; // Échec du chargement
     }
+
+    strncpy(sCurPath, path, sizeof(sCurPath) - 1);
+    sCurPath[sizeof(sCurPath) - 1] = 0;
+    AddToHistory(sCurPath);
 
     sPlayerController = new PlayerController(&sPlayer);
     sPlayerController->Initialize();
@@ -191,6 +196,25 @@ static void RebuildShuffleBag()
 // de touche comme avant, donc son coût ponctuel est acceptable). Remplit
 // sIndexBuf/sIndexOffset/sIndexCount. Retourne le nombre de dossiers dont
 // IPC_CMD_LIST_DIR a échoué (utilisé pour décider un retry côté appelant).
+// Attend une réponse FIFO avec timeout (en VBlanks, ~60/s), pour ne jamais
+// bloquer indéfiniment si l'ARM7 reste bloqué sur un accès carte SD
+// défaillant. On préfère traiter le dossier courant comme en échec plutôt
+// que de figer l'app jusqu'au watchdog externe de nds-bootstrap. Si la
+// réponse ARM7 arrive malgré tout après le timeout, elle reste en attente
+// dans la FIFO et sera consommée/jetée par le flush de sécurité en tête de
+// switchToRandomVideoAll() lors du prochain appel (voir "SÉCURITÉ IPC" plus
+// bas) - léger risque de perdre un résultat, jamais de désynchronisation
+// durable du protocole.
+static bool WaitFifoWithTimeout(int timeoutVBlanks)
+{
+    while (!fifoCheckValue32(FIFO_USER_02)) {
+        swiWaitForVBlank();
+        if (--timeoutVBlanks <= 0)
+            return false;
+    }
+    return true;
+}
+
 static int BuildVideoIndex()
 {
     sIndexCount = 0;
@@ -219,10 +243,11 @@ static int BuildVideoIndex()
 
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
 
-        // Attente asynchrone (Yield) : nourrit aussi le watchdog, donc pas
-        // besoin d'un plafond de dossiers pour un scan qui reste réactif.
-        while (!fifoCheckValue32(FIFO_USER_02)) {
-            swiWaitForVBlank();
+        // ~5s (300 VBlanks) : largement au-dessus du temps normal d'un
+        // f_opendir/f_readdir, mais court devant un vrai blocage matériel.
+        if (!WaitFifoWithTimeout(300)) {
+            failedDirs++;
+            continue;
         }
 
         u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
@@ -340,25 +365,26 @@ static void switchToRandomVideoAll()
 
     if (sIndexCount > 0) {
         // Pioche dans le bag en sautant la vidéo courante et l'historique
-        // récent ; jamais plus d'un tour complet du bag pour rester borné
-        // si la bibliothèque est petite et très couverte par l'historique.
-        char selected[FV_MAX_PATH_LEN];
-        selected[0] = '\0';
+        // récent, et RETENTE avec un autre candidat si le chargement échoue
+        // (fichier illisible, glitch I/O ponctuel) - sans ce retry, un seul
+        // échec de chargement faisait retomber sur prevPath juste en dessous,
+        // ce qui donnait l'impression que "next" relançait la même vidéo.
+        // Jamais plus d'un tour complet du bag pour rester borné si la
+        // bibliothèque est petite et très couverte par l'historique.
         u32 attemptsLeft = sIndexCount;
-        while (attemptsLeft-- > 0) {
+        while (attemptsLeft-- > 0 && !loadSuccess) {
             if (sShuffleBagRemaining == 0)
                 RebuildShuffleBag();
             u32 idx = sShuffleBag[--sShuffleBagRemaining];
             const char* candidate = sIndexBuf + sIndexOffset[idx];
             if (strcasecmp(candidate, sCurPath) == 0) continue;
             if (IsInHistory(candidate)) continue;
+
+            char selected[FV_MAX_PATH_LEN];
             strncpy(selected, candidate, FV_MAX_PATH_LEN - 1);
             selected[FV_MAX_PATH_LEN - 1] = '\0';
-            break;
-        }
-
-        if (selected[0] != '\0')
             loadSuccess = loadAndStartVideo(selected);
+        }
     }
 
     // SÉCURITÉ DE SECOURS : rien trouvé ou échec du chargement -> relance l'ancienne vidéo
