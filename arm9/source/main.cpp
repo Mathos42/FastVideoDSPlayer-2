@@ -21,6 +21,9 @@ extern u8 gDldiStub[];
 static char sAdjacentPath[FV_MAX_PATH_LEN] ALIGN(32);
 static char sCurPath[FV_MAX_PATH_LEN];
 
+// NOUVEAU : Buffer global pour que l'ARM7 puisse lire le chemin sans crasher
+static char sTempPath[FV_MAX_PATH_LEN] ALIGN(32);
+
 static bool sCanUseWram;
 static bool sLoopEnabled = false;
 
@@ -31,7 +34,6 @@ static bool sStandalone = false;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
 
-// Récupération de la variable d'inversion des écrans depuis PlayerController.cpp
 extern bool gScreenSwapped;
 
 // --- GESTION DE L'HISTORIQUE ---
@@ -91,7 +93,7 @@ static void ShowVideoMessage()
     sPlayerController->ShowMessage(displayName, line2);
 }
 
-// CORRECTION MAJEURE : On met à jour sCurPath et l'historique UNIQUEMENT en cas de succès
+// CORRECTION MAJEURE ET FINALE
 static bool loadAndStartVideo(const char* path)
 {
     if (sPlayerController)
@@ -102,14 +104,20 @@ static bool loadAndStartVideo(const char* path)
         fv_destroyPlayer(&sPlayer);
     }
 
-    if (!fv_initPlayer(&sPlayer, path, sCanUseWram))
+    // 1. On copie le chemin dans une variable globale accessible par l'ARM7
+    strncpy(sTempPath, path, sizeof(sTempPath) - 1);
+    sTempPath[sizeof(sTempPath) - 1] = '\0';
+    DC_FlushRange(sTempPath, sizeof(sTempPath)); // Indispensable pour la synchro ARM9 -> ARM7
+
+    // 2. On tente de charger la vidéo depuis le buffer sécurisé
+    if (!fv_initPlayer(&sPlayer, sTempPath, sCanUseWram))
     {
         fv_destroyPlayer(&sPlayer);
-        return false; // Échec du chargement : on quitte sans rien polluer !
+        return false; // Échec -> on quitte sans avoir touché à sCurPath ni à l'historique
     }
 
-    // Le fichier est valide, on peut mettre à jour nos variables en toute sécurité
-    strncpy(sCurPath, path, sizeof(sCurPath) - 1);
+    // 3. Succès ! On peut maintenant polluer les variables d'état l'esprit tranquille
+    strncpy(sCurPath, sTempPath, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
 
     AddToHistory(sCurPath);
@@ -122,7 +130,7 @@ static bool loadAndStartVideo(const char* path)
 
 static void switchToAdjacentVideo(bool next)
 {
-    if (sPlayerController) fv_pausePlayer(&sPlayer); // Libère la SD pour éviter les conflits
+    if (sPlayerController) fv_pausePlayer(&sPlayer); // Libère la SD pour éviter les conflits X/Y/L/R
 
     fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(next ? IPC_CMD_FIND_NEXT_FILE : IPC_CMD_FIND_PREV_FILE,
                                                (u32)sAdjacentPath));
@@ -147,7 +155,7 @@ static void switchToAdjacentVideo(bool next)
 
 static void switchToRandomVideo()
 {
-    if (sPlayerController) fv_pausePlayer(&sPlayer); // Libère la SD
+    if (sPlayerController) fv_pausePlayer(&sPlayer);
 
     fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE, (u32)sAdjacentPath));
     fifoWaitValue32(FIFO_USER_02);
@@ -175,7 +183,6 @@ static int sDirDepth[MAX_DIR_STACK];
 static fv_listdir_req_t sListReq ALIGN(32);
 static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
-// Ta méthode Reservoir Sampling (Zéro Ram requise, ultra rapide)
 static void switchToRandomVideoAllScan(char* outSelected, int* outCount, int* outFailedDirs, int* outTruncatedDirs)
 {
     outSelected[0] = '\0';
@@ -303,8 +310,6 @@ static void switchToRandomVideoAll()
     bool loadSuccess = false;
     int loadAttempts = 0;
 
-    // --- LA BOUCLE DE RETRY ---
-    // Si la vidéo choisie est corrompue, on rescane pour en trouver une autre jusqu'à 5 fois
     while (!loadSuccess && loadAttempts < 5) {
         char selectedPath[FV_MAX_PATH_LEN];
         int count = 0, failedDirs = 0, truncatedDirs = 0;
@@ -319,7 +324,7 @@ static void switchToRandomVideoAll()
         if (count > 0 && selectedPath[0] != '\0') {
             loadSuccess = loadAndStartVideo(selectedPath);
         } else {
-            break; // Aucune vidéo dispo, on stoppe les essais
+            break; 
         }
         
         loadAttempts++;
@@ -327,7 +332,6 @@ static void switchToRandomVideoAll()
 
     consoleClear();
 
-    // SÉCURITÉ DE SECOURS : Si AUCUNE des tentatives n'a marché, on restaure la vidéo d'origine
     if (!loadSuccess) {
         if (prevPath[0]) loadAndStartVideo(prevPath);
     }
