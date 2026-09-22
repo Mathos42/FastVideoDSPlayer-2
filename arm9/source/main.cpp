@@ -31,7 +31,6 @@ static bool sStandalone = false;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
 
-// Récupération de la variable d'inversion des écrans depuis PlayerController.cpp
 extern bool gScreenSwapped;
 
 // --- GESTION DE L'HISTORIQUE ---
@@ -53,19 +52,113 @@ static bool IsInHistory(const char* path) {
     }
     return false;
 }
-// --------------------------------
+
+// --- GESTION DU CACHE GLOBAL ---
+#define MAX_GLOBAL_VIDEOS 1000 
+static char (*sGlobalVideoCache)[FV_MAX_PATH_LEN] = NULL;
+static int sGlobalVideoCount = 0;
+static bool sGlobalCacheBuilt = false;
+
+#define MAX_DIR_STACK 256
+static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
+static int sDirDepth[MAX_DIR_STACK]; 
+static fv_listdir_req_t sListReq ALIGN(32);
+static fv_dir_entry_t sListEntries[256] ALIGN(32);
+
+static void BuildGlobalVideoCache()
+{
+    if (sGlobalVideoCache == NULL) {
+        sGlobalVideoCache = (char(*)[FV_MAX_PATH_LEN])malloc(MAX_GLOBAL_VIDEOS * FV_MAX_PATH_LEN);
+    }
+    if (!sGlobalVideoCache) return; 
+    
+    sGlobalVideoCount = 0;
+
+    int stackTop = 0;
+    strncpy(sDirStack[stackTop], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    sDirDepth[stackTop] = 0; 
+    stackTop++;
+    
+    int maxFoldersToScan = 350; 
+
+    while (stackTop > 0 && maxFoldersToScan > 0) {
+        maxFoldersToScan--;
+        stackTop--;
+        
+        char currentDir[FV_MAX_PATH_LEN];
+        strncpy(currentDir, sDirStack[stackTop], FV_MAX_PATH_LEN - 1);
+        currentDir[FV_MAX_PATH_LEN - 1] = '\0';
+        int currentDepth = sDirDepth[stackTop];
+        
+        strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
+        sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
+        sListReq.entries = sListEntries;
+        sListReq.maxEntries = 256; 
+        
+        DC_FlushRange(&sListReq, sizeof(sListReq));
+        DC_FlushRange(sListEntries, sizeof(sListEntries));
+        
+        fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
+        
+        while (!fifoCheckValue32(FIFO_USER_02)) {
+            swiWaitForVBlank(); 
+        }
+        
+        u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
+        
+        DC_InvalidateRange(&sListReq, sizeof(sListReq));
+        DC_InvalidateRange(sListEntries, sizeof(sListEntries));
+        
+        if (!ok) continue;
+        
+        for (u32 i = 0; i < sListReq.count; i++) {
+            const char* dName = sListEntries[i].name;
+            
+            if (dName[0] == '.') continue;
+            if (strcasecmp(dName, "System Volume Information") == 0) continue;
+            if (strcasecmp(dName, "_nds") == 0) continue;
+            if (strcasecmp(dName, "Nintendo 3DS") == 0) continue;
+            if (strcasecmp(dName, "Nintendo DSi") == 0) continue;
+            if (strcasecmp(dName, "TWiLightMenu") == 0) continue;
+            if (strcasecmp(dName, "luma") == 0) continue;
+            if (strcasecmp(dName, "DCIM") == 0) continue;
+            
+            char fullPath[FV_MAX_PATH_LEN];
+            int dirLen = strlen(currentDir);
+            int nameLen = strlen(dName);
+            
+            if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
+            
+            strcpy(fullPath, currentDir);
+            if (dirLen > 0 && fullPath[dirLen - 1] != '/') strcat(fullPath, "/");
+            strcat(fullPath, dName);
+            
+            if (sListEntries[i].isDir) {
+                if (stackTop < MAX_DIR_STACK && currentDepth < 4) {
+                    strncpy(sDirStack[stackTop], fullPath, FV_MAX_PATH_LEN - 1);
+                    sDirDepth[stackTop] = currentDepth + 1;
+                    stackTop++;
+                }
+            } else {
+                if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
+                    if (sGlobalVideoCount < MAX_GLOBAL_VIDEOS) {
+                        strncpy(sGlobalVideoCache[sGlobalVideoCount], fullPath, FV_MAX_PATH_LEN - 1);
+                        sGlobalVideoCache[sGlobalVideoCount][FV_MAX_PATH_LEN - 1] = '\0';
+                        
+                        sGlobalVideoCount++;
+                        
+                        // ANIMATION DU COMPTEUR : On se place sur la ligne 10, colonne 1 pour mettre à jour
+                        printf("\x1b[10;1H    %d videos indexees", sGlobalVideoCount);
+                    }
+                }
+            }
+        }
+    }
+    sGlobalCacheBuilt = true;
+}
+// ----------------------------------------------------------------
 
 u32 GetDebounceTicks();
-
-static void DestroyCurrentPlayer();
-
-// Seed du LCG utilisé par le reservoir sampling en mode ALL. Persistante
-// (au lieu d'être recalculée à chaque appel depuis GetDebounceTicks) pour
-// éviter que deux appels rapprochés (vidéo courte, appuis rapides sur
-// suivant) ne partent d'un état de timer quasi identique et ne retirent
-// des séquences de tirages corrélées.
-static u32 sShuffleSeed = 0;
-static bool sShuffleSeedInit = false;
 
 static const char* GetFileName(const char* path)
 {
@@ -87,10 +180,7 @@ static void ShowVideoMessage()
 
     char line2[32];
     const char* randomStateStr;
-    // "ALL" et non "ON ALL" : les 3 états doivent tenir sur 3 caractères
-    // pour que le pire cas ("ALEA:xxx  BOUCLE:OFF") reste <= MAX_MSG_CHARS
-    // (20, voir PlayerView.h) et ne soit pas tronqué par RenderTextLine.
-    if (sRandomMode == 2) randomStateStr = "ALL";
+    if (sRandomMode == 2) randomStateStr = "ON ALL";
     else if (sRandomMode == 1) randomStateStr = "ON ";
     else randomStateStr = "OFF";
 
@@ -108,21 +198,16 @@ static bool loadAndStartVideo(const char* path)
         fv_destroyPlayer(&sPlayer);
     }
 
-    // sCurPath/l'historique ne sont mis à jour qu'en cas de succès : sinon
-    // un fv_initPlayer en échec pollue sCurPath avec un chemin jamais
-    // réellement joué (et l'ajoute à l'historique), ce qui fausse les
-    // exclusions "vidéo courante"/"déjà vue récemment" ailleurs dans le
-    // fichier - particulièrement sensible en mode ALL où switchToRandomVideoAll()
-    // peut désormais retenter loadAndStartVideo() plusieurs fois d'affilée.
-    if (!fv_initPlayer(&sPlayer, path, sCanUseWram))
-    {
-        fv_destroyPlayer(&sPlayer);
-        return false; // Échec du chargement
-    }
-
     strncpy(sCurPath, path, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
+
     AddToHistory(sCurPath);
+
+    if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
+    {
+        fv_destroyPlayer(&sPlayer);
+        return false;
+    }
 
     sPlayerController = new PlayerController(&sPlayer);
     sPlayerController->Initialize();
@@ -153,244 +238,66 @@ static void switchToRandomVideo()
     loadAndStartVideo(sAdjacentPath);
 }
 
-#define MAX_DIR_STACK 256
-static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
-static fv_listdir_req_t sListReq ALIGN(32);
-static fv_dir_entry_t sListEntries[256] ALIGN(32);
-
-// Index complet des .fv de la carte SD, construit une seule fois par
-// lancement de l'app (au premier passage en mode ALL), puis gardé en RAM
-// pour toute la session : plus aucun IPC_CMD_LIST_DIR au moment de choisir
-// une vidéo, juste une lecture de tableau. Stockage en chemins concaténés
-// (plutôt qu'un tableau [N][FV_MAX_PATH_LEN] qui gâcherait ~200 octets par
-// entrée en moyenne) pour rester large sans peser sur la RAM ARM9.
-#define VIDEO_INDEX_MAX_ENTRIES 4096
-#define VIDEO_INDEX_BUF_SIZE    (256 * 1024)
-static char sIndexBuf[VIDEO_INDEX_BUF_SIZE];
-static u32  sIndexOffset[VIDEO_INDEX_MAX_ENTRIES];
-static u32  sIndexCount = 0;
-static u32  sIndexBufUsed = 0;
-static bool sIndexBuilt = false;
-
-// Bag mélangé (Fisher-Yates) sur les indices [0..sIndexCount) : tirage sans
-// remise jusqu'à épuisement, puis remélange - même principe que le shuffle
-// bag déjà utilisé côté ARM7 pour le mode aléatoire par dossier.
-static u32 sShuffleBag[VIDEO_INDEX_MAX_ENTRIES];
-static u32 sShuffleBagRemaining = 0;
-
-static void RebuildShuffleBag()
-{
-    sShuffleBagRemaining = sIndexCount;
-    for (u32 i = 0; i < sIndexCount; i++) sShuffleBag[i] = i;
-    for (u32 i = sIndexCount; i > 1; i--) {
-        sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
-        u32 j = (sShuffleSeed >> 16) % i;
-        u32 tmp = sShuffleBag[i - 1];
-        sShuffleBag[i - 1] = sShuffleBag[j];
-        sShuffleBag[j] = tmp;
-    }
-}
-
-// Parcours BFS exhaustif de la carte (plus de plafond de dossiers ni de
-// profondeur : c'est un scan unique par session, pas un scan par pression
-// de touche comme avant, donc son coût ponctuel est acceptable). Remplit
-// sIndexBuf/sIndexOffset/sIndexCount. Retourne le nombre de dossiers dont
-// IPC_CMD_LIST_DIR a échoué (utilisé pour décider un retry côté appelant).
-// Attend une réponse FIFO avec timeout (en VBlanks, ~60/s), pour ne jamais
-// bloquer indéfiniment si l'ARM7 reste bloqué sur un accès carte SD
-// défaillant. On préfère traiter le dossier courant comme en échec plutôt
-// que de figer l'app jusqu'au watchdog externe de nds-bootstrap. Si la
-// réponse ARM7 arrive malgré tout après le timeout, elle reste en attente
-// dans la FIFO et sera consommée/jetée par le flush de sécurité en tête de
-// switchToRandomVideoAll() lors du prochain appel (voir "SÉCURITÉ IPC" plus
-// bas) - léger risque de perdre un résultat, jamais de désynchronisation
-// durable du protocole.
-static bool WaitFifoWithTimeout(int timeoutVBlanks)
-{
-    while (!fifoCheckValue32(FIFO_USER_02)) {
-        swiWaitForVBlank();
-        if (--timeoutVBlanks <= 0)
-            return false;
-    }
-    return true;
-}
-
-static int BuildVideoIndex()
-{
-    sIndexCount = 0;
-    sIndexBufUsed = 0;
-    int failedDirs = 0;
-    int truncatedDirs = 0;
-
-    int queueHead = 0;
-    int queueTail = 0;
-    strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
-    queueTail++;
-
-    while (queueHead < queueTail) {
-        char currentDir[FV_MAX_PATH_LEN];
-        strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
-        currentDir[FV_MAX_PATH_LEN - 1] = '\0';
-        queueHead++;
-
-        strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
-        sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
-        sListReq.entries = sListEntries;
-        sListReq.maxEntries = 256;
-
-        DC_FlushRange(&sListReq, sizeof(sListReq));
-        DC_FlushRange(sListEntries, sizeof(sListEntries));
-
-        fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
-
-        // ~5s (300 VBlanks) : largement au-dessus du temps normal d'un
-        // f_opendir/f_readdir, mais court devant un vrai blocage matériel.
-        if (!WaitFifoWithTimeout(300)) {
-            failedDirs++;
-            continue;
-        }
-
-        u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
-
-        DC_InvalidateRange(&sListReq, sizeof(sListReq));
-        DC_InvalidateRange(sListEntries, sizeof(sListEntries));
-
-        if (!ok) { failedDirs++; continue; }
-        if (sListReq.total > sListReq.count) truncatedDirs++;
-
-        for (u32 i = 0; i < sListReq.count; i++) {
-            const char* dName = sListEntries[i].name;
-
-            if (dName[0] == '.') continue;
-            if (strcasecmp(dName, "System Volume Information") == 0) continue;
-            if (strcasecmp(dName, "_nds") == 0) continue;
-            if (strcasecmp(dName, "Nintendo 3DS") == 0) continue;
-            if (strcasecmp(dName, "Nintendo DSi") == 0) continue;
-            if (strcasecmp(dName, "TWiLightMenu") == 0) continue;
-            if (strcasecmp(dName, "luma") == 0) continue;
-            if (strcasecmp(dName, "DCIM") == 0) continue;
-
-            char fullPath[FV_MAX_PATH_LEN];
-            int dirLen = strlen(currentDir);
-            int nameLen = strlen(dName);
-
-            if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
-
-            strcpy(fullPath, currentDir);
-            if (dirLen > 0 && fullPath[dirLen - 1] != '/') strcat(fullPath, "/");
-            strcat(fullPath, dName);
-
-            if (sListEntries[i].isDir) {
-                if (queueTail < MAX_DIR_STACK) {
-                    strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
-                    queueTail++;
-                }
-            } else if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
-                size_t pathLen = strlen(fullPath);
-                if (sIndexCount < VIDEO_INDEX_MAX_ENTRIES &&
-                    sIndexBufUsed + pathLen + 1 <= VIDEO_INDEX_BUF_SIZE)
-                {
-                    memcpy(sIndexBuf + sIndexBufUsed, fullPath, pathLen + 1);
-                    sIndexOffset[sIndexCount] = sIndexBufUsed;
-                    sIndexBufUsed += (u32)(pathLen + 1);
-                    sIndexCount++;
-                }
-            }
-        }
-    }
-
-    return failedDirs;
-}
-
 static void switchToRandomVideoAll()
 {
-    // Sauvegarde AVANT loadAndStartVideo(), qui écrase sCurPath dès l'appel
-    // (avant même de savoir si le chargement réussit). Sans ça, le filet de
-    // sécurité plus bas rejoue le fichier en échec au lieu de l'ancienne vidéo.
-    char prevPath[FV_MAX_PATH_LEN];
-    strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
-    prevPath[FV_MAX_PATH_LEN - 1] = '\0';
-
-    DestroyCurrentPlayer();
-
-    // SÉCURITÉ IPC : On vide les anciens messages bloqués pour éviter une désynchronisation
+    if (sPlayerController)
+    {
+        fv_pausePlayer(&sPlayer);
+        delete sPlayerController;
+        sPlayerController = NULL;
+        fv_destroyPlayer(&sPlayer);
+    }
+    
     while (fifoCheckValue32(FIFO_USER_02)) {
         fifoGetValue32(FIFO_USER_02);
     }
-
-    // Petite pause pour laisser la SD fermer proprement le fichier vidéo
+    
     for (int i = 0; i < 10; i++) swiWaitForVBlank();
-
-    if (!sShuffleSeedInit) {
-        sShuffleSeed = GetDebounceTicks() ^ 0x13579BDF;
-        sShuffleSeedInit = true;
-    }
-
-    if (!sIndexBuilt) {
-        // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
-        // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
-        // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran
-        // "Indexation..." s'afficherait par-dessus/mélangé à ces résidus.
-        oamClear(&oamSub, 0, 128);
-        REG_DISPCNT_SUB = MODE_0_2D;
-        consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
-        REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
-
+    
+    // Si le cache n'a pas encore été construit, on l'affiche
+    if (!sGlobalCacheBuilt) {
         consoleClear();
-        printf("\n\n\n\n    Indexation de la carte SD...\n\n    Veuillez patienter...");
+        // Le texte initial s'affiche, le "0 videos indexees" se trouve sur la 10ème ligne
+        printf("\n\n\n\n    Creation de l'index\n    des videos SD...\n\n    Veuillez patienter !\n\n    0 videos indexees");
         swiWaitForVBlank();
-
-        int failedDirs = BuildVideoIndex();
-        // Index vide ET au moins un dossier en échec IPC (pas juste "carte
-        // sans .fv") -> probable glitch I/O transitoire, on retente une fois.
-        if (sIndexCount == 0 && failedDirs > 0) {
-            for (int i = 0; i < 10; i++) swiWaitForVBlank();
-            BuildVideoIndex();
-        }
-
-        RebuildShuffleBag();
-        // Construit une seule fois par lancement de l'app : un échec I/O
-        // persistant ou une bibliothèque vide ne redéclenchera pas de
-        // nouvelle tentative avant un redémarrage du logiciel.
-        sIndexBuilt = true;
-
-        consoleClear();
-        printf("\n\n\n\n    %lu videos indexees.", (unsigned long)sIndexCount);
-        swiWaitForVBlank();
+        
+        BuildGlobalVideoCache();
+        
+        // Petite pause d'une demi-seconde à la fin pour voir le score final !
         for (int i = 0; i < 30; i++) swiWaitForVBlank();
+        
         consoleClear();
     }
-
+    
     bool loadSuccess = false;
-
-    if (sIndexCount > 0) {
-        // Pioche dans le bag en sautant la vidéo courante et l'historique
-        // récent, et RETENTE avec un autre candidat si le chargement échoue
-        // (fichier illisible, glitch I/O ponctuel) - sans ce retry, un seul
-        // échec de chargement faisait retomber sur prevPath juste en dessous,
-        // ce qui donnait l'impression que "next" relançait la même vidéo.
-        // Jamais plus d'un tour complet du bag pour rester borné si la
-        // bibliothèque est petite et très couverte par l'historique.
-        u32 attemptsLeft = sIndexCount;
-        while (attemptsLeft-- > 0 && !loadSuccess) {
-            if (sShuffleBagRemaining == 0)
-                RebuildShuffleBag();
-            u32 idx = sShuffleBag[--sShuffleBagRemaining];
-            const char* candidate = sIndexBuf + sIndexOffset[idx];
-            if (strcasecmp(candidate, sCurPath) == 0) continue;
-            if (IsInHistory(candidate)) continue;
-
-            char selected[FV_MAX_PATH_LEN];
-            strncpy(selected, candidate, FV_MAX_PATH_LEN - 1);
-            selected[FV_MAX_PATH_LEN - 1] = '\0';
-            loadSuccess = loadAndStartVideo(selected);
+    
+    if (sGlobalVideoCount > 0) {
+        u32 seed = GetDebounceTicks() ^ 0x13579BDF;
+        
+        int attempts = 0;
+        char selectedPath[FV_MAX_PATH_LEN];
+        selectedPath[0] = '\0';
+        
+        while (attempts < 50) {
+            seed = (1103515245 * seed + 12345);
+            int randIdx = (seed >> 16) % sGlobalVideoCount;
+            
+            if (strcasecmp(sGlobalVideoCache[randIdx], sCurPath) != 0 &&
+                !IsInHistory(sGlobalVideoCache[randIdx])) {
+                strncpy(selectedPath, sGlobalVideoCache[randIdx], FV_MAX_PATH_LEN - 1);
+                break;
+            }
+            attempts++;
         }
-    }
-
-    // SÉCURITÉ DE SECOURS : rien trouvé ou échec du chargement -> relance l'ancienne vidéo
+        
+        if (selectedPath[0] != '\0') {
+            loadSuccess = loadAndStartVideo(selectedPath);
+        }
+    } 
+    
     if (!loadSuccess) {
-        if (sIndexCount == 0) sHistoryCount = 0; // vide l'historique s'il est plein
-        if (prevPath[0]) loadAndStartVideo(prevPath);
+        if (sGlobalVideoCount == 0) sHistoryCount = 0; 
+        if (sCurPath[0]) loadAndStartVideo(sCurPath);
     }
 }
 
@@ -437,17 +344,15 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
 
 static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
-    // --- NOUVEAUTÉ : On force les écrans dans le bon sens (vidéo en haut, menu en bas) ---
     gScreenSwapped = false;
     lcdMainOnTop();
-    // -----------------------------------------------------------------------------------
 
     PlayerController::RestoreSubScreen();
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
 
-    browser.SetModes(sLoopEnabled, sRandomMode);
+    browser.SetModes(sLoopEnabled, sRandomMode > 0);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -479,12 +384,12 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
 
             case BrowserController::ACT_TOGGLE_LOOP:
                 sLoopEnabled = !sLoopEnabled;
-                browser.SetModes(sLoopEnabled, sRandomMode);
+                browser.SetModes(sLoopEnabled, sRandomMode > 0);
                 break;
 
             case BrowserController::ACT_TOGGLE_RANDOM:
                 sRandomMode = (sRandomMode == 0) ? 1 : 0; 
-                browser.SetModes(sLoopEnabled, sRandomMode);
+                browser.SetModes(sLoopEnabled, sRandomMode > 0);
                 break;
 
             default:
