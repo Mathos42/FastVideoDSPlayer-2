@@ -150,48 +150,63 @@ static void switchToRandomVideo()
 
 #define MAX_DIR_STACK 256
 static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
-static int sDirDepth[MAX_DIR_STACK]; 
 static fv_listdir_req_t sListReq ALIGN(32);
 static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
-// Un passage complet du parcours BFS de la carte SD (limité à
-// maxFoldersToScan dossiers et depth < 3, comme avant). Retourne le chemin
-// tiré au sort dans outSelected (vide si aucun trouvé), et remonte le
-// nombre de candidats vus (outCount) ainsi que le nombre de dossiers dont
-// IPC_CMD_LIST_DIR a échoué (outFailedDirs) et le nombre de dossiers
-// tronqués car ils contenaient plus de maxEntries entrées (outTruncatedDirs)
-// - ces deux derniers servent à décider s'il faut retenter le scan plutôt
-// que de rejouer prevPath à la moindre erreur I/O transitoire de la carte.
-static void switchToRandomVideoAllScan(char* outSelected, int* outCount, int* outFailedDirs, int* outTruncatedDirs)
+// Index complet des .fv de la carte SD, construit une seule fois par
+// lancement de l'app (au premier passage en mode ALL), puis gardé en RAM
+// pour toute la session : plus aucun IPC_CMD_LIST_DIR au moment de choisir
+// une vidéo, juste une lecture de tableau. Stockage en chemins concaténés
+// (plutôt qu'un tableau [N][FV_MAX_PATH_LEN] qui gâcherait ~200 octets par
+// entrée en moyenne) pour rester large sans peser sur la RAM ARM9.
+#define VIDEO_INDEX_MAX_ENTRIES 4096
+#define VIDEO_INDEX_BUF_SIZE    (256 * 1024)
+static char sIndexBuf[VIDEO_INDEX_BUF_SIZE];
+static u32  sIndexOffset[VIDEO_INDEX_MAX_ENTRIES];
+static u32  sIndexCount = 0;
+static u32  sIndexBufUsed = 0;
+static bool sIndexBuilt = false;
+
+// Bag mélangé (Fisher-Yates) sur les indices [0..sIndexCount) : tirage sans
+// remise jusqu'à épuisement, puis remélange - même principe que le shuffle
+// bag déjà utilisé côté ARM7 pour le mode aléatoire par dossier.
+static u32 sShuffleBag[VIDEO_INDEX_MAX_ENTRIES];
+static u32 sShuffleBagRemaining = 0;
+
+static void RebuildShuffleBag()
 {
-    outSelected[0] = '\0';
-    int count = 0;
+    sShuffleBagRemaining = sIndexCount;
+    for (u32 i = 0; i < sIndexCount; i++) sShuffleBag[i] = i;
+    for (u32 i = sIndexCount; i > 1; i--) {
+        sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
+        u32 j = (sShuffleSeed >> 16) % i;
+        u32 tmp = sShuffleBag[i - 1];
+        sShuffleBag[i - 1] = sShuffleBag[j];
+        sShuffleBag[j] = tmp;
+    }
+}
+
+// Parcours BFS exhaustif de la carte (plus de plafond de dossiers ni de
+// profondeur : c'est un scan unique par session, pas un scan par pression
+// de touche comme avant, donc son coût ponctuel est acceptable). Remplit
+// sIndexBuf/sIndexOffset/sIndexCount. Retourne le nombre de dossiers dont
+// IPC_CMD_LIST_DIR a échoué (utilisé pour décider un retry côté appelant).
+static int BuildVideoIndex()
+{
+    sIndexCount = 0;
+    sIndexBufUsed = 0;
     int failedDirs = 0;
     int truncatedDirs = 0;
 
     int queueHead = 0;
     int queueTail = 0;
     strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
-    sDirDepth[queueTail] = 0;
     queueTail++;
 
-    if (!sShuffleSeedInit) {
-        sShuffleSeed = GetDebounceTicks() ^ 0x13579BDF;
-        sShuffleSeedInit = true;
-    }
-
-    // LA SÉCURITÉ ULTIME DSi : Limiter le nombre de dossiers scannés à 60 maximum.
-    // Cela garantit que la recherche dure moins d'1 seconde et empêche le watchdog de redémarrer la console.
-    int maxFoldersToScan = 60;
-
-    while (queueHead < queueTail && maxFoldersToScan > 0) {
-
-        maxFoldersToScan--;
-
+    while (queueHead < queueTail) {
         char currentDir[FV_MAX_PATH_LEN];
         strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
         currentDir[FV_MAX_PATH_LEN - 1] = '\0';
-        int currentDepth = sDirDepth[queueHead];
         queueHead++;
 
         strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
@@ -204,7 +219,8 @@ static void switchToRandomVideoAllScan(char* outSelected, int* outCount, int* ou
 
         fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
 
-        // Attente asynchrone (Yield) pour nourrir le système
+        // Attente asynchrone (Yield) : nourrit aussi le watchdog, donc pas
+        // besoin d'un plafond de dossiers pour un scan qui reste réactif.
         while (!fifoCheckValue32(FIFO_USER_02)) {
             swiWaitForVBlank();
         }
@@ -220,7 +236,6 @@ static void switchToRandomVideoAllScan(char* outSelected, int* outCount, int* ou
         for (u32 i = 0; i < sListReq.count; i++) {
             const char* dName = sListEntries[i].name;
 
-            // Exclusions des dossiers non pertinents
             if (dName[0] == '.') continue;
             if (strcasecmp(dName, "System Volume Information") == 0) continue;
             if (strcasecmp(dName, "_nds") == 0) continue;
@@ -241,30 +256,25 @@ static void switchToRandomVideoAllScan(char* outSelected, int* outCount, int* ou
             strcat(fullPath, dName);
 
             if (sListEntries[i].isDir) {
-                if (queueTail < MAX_DIR_STACK && currentDepth < 3) {
+                if (queueTail < MAX_DIR_STACK) {
                     strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
-                    sDirDepth[queueTail] = currentDepth + 1;
                     queueTail++;
                 }
-            } else {
-                if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
-                    if (strcasecmp(fullPath, sCurPath) == 0) continue;
-                    if (IsInHistory(fullPath)) continue;
-
-                    count++;
-                    sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
-                    if (((sShuffleSeed >> 16) % count) == 0) {
-                        strncpy(outSelected, fullPath, FV_MAX_PATH_LEN - 1);
-                        outSelected[FV_MAX_PATH_LEN - 1] = '\0';
-                    }
+            } else if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
+                size_t pathLen = strlen(fullPath);
+                if (sIndexCount < VIDEO_INDEX_MAX_ENTRIES &&
+                    sIndexBufUsed + pathLen + 1 <= VIDEO_INDEX_BUF_SIZE)
+                {
+                    memcpy(sIndexBuf + sIndexBufUsed, fullPath, pathLen + 1);
+                    sIndexOffset[sIndexCount] = sIndexBufUsed;
+                    sIndexBufUsed += (u32)(pathLen + 1);
+                    sIndexCount++;
                 }
             }
         }
     }
 
-    *outCount = count;
-    *outFailedDirs = failedDirs;
-    *outTruncatedDirs = truncatedDirs;
+    return failedDirs;
 }
 
 static void switchToRandomVideoAll()
@@ -286,44 +296,74 @@ static void switchToRandomVideoAll()
     // Petite pause pour laisser la SD fermer proprement le fichier vidéo
     for (int i = 0; i < 10; i++) swiWaitForVBlank();
 
-    // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
-    // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
-    // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran "Recherche
-    // de vidéos..." s'afficherait par-dessus/mélangé à ces résidus, exactement le
-    // problème que BrowserView::Initialize() évite déjà avant d'afficher la liste
-    // de fichiers (mêmes paramètres consoleInit qu'au boot).
-    oamClear(&oamSub, 0, 128);
-    REG_DISPCNT_SUB = MODE_0_2D;
-    consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
-    REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
-
-    consoleClear();
-    printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
-    swiWaitForVBlank();
-
-    char selectedPath[FV_MAX_PATH_LEN];
-    int count = 0, failedDirs = 0, truncatedDirs = 0;
-    switchToRandomVideoAllScan(selectedPath, &count, &failedDirs, &truncatedDirs);
-
-    // Aucun candidat ET au moins un dossier en échec IPC (pas juste "carte
-    // avec peu de vidéos") -> probable glitch I/O transitoire de la carte
-    // SD, on retente une fois plutôt que de rejouer prevPath directement.
-    if (count == 0 && failedDirs > 0) {
-        for (int i = 0; i < 10; i++) swiWaitForVBlank();
-        switchToRandomVideoAllScan(selectedPath, &count, &failedDirs, &truncatedDirs);
+    if (!sShuffleSeedInit) {
+        sShuffleSeed = GetDebounceTicks() ^ 0x13579BDF;
+        sShuffleSeedInit = true;
     }
 
-    consoleClear();
+    if (!sIndexBuilt) {
+        // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
+        // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
+        // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran
+        // "Indexation..." s'afficherait par-dessus/mélangé à ces résidus.
+        oamClear(&oamSub, 0, 128);
+        REG_DISPCNT_SUB = MODE_0_2D;
+        consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
+        REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
+
+        consoleClear();
+        printf("\n\n\n\n    Indexation de la carte SD...\n\n    Veuillez patienter...");
+        swiWaitForVBlank();
+
+        int failedDirs = BuildVideoIndex();
+        // Index vide ET au moins un dossier en échec IPC (pas juste "carte
+        // sans .fv") -> probable glitch I/O transitoire, on retente une fois.
+        if (sIndexCount == 0 && failedDirs > 0) {
+            for (int i = 0; i < 10; i++) swiWaitForVBlank();
+            BuildVideoIndex();
+        }
+
+        RebuildShuffleBag();
+        // Construit une seule fois par lancement de l'app : un échec I/O
+        // persistant ou une bibliothèque vide ne redéclenchera pas de
+        // nouvelle tentative avant un redémarrage du logiciel.
+        sIndexBuilt = true;
+
+        consoleClear();
+        printf("\n\n\n\n    %lu videos indexees.", (unsigned long)sIndexCount);
+        swiWaitForVBlank();
+        for (int i = 0; i < 30; i++) swiWaitForVBlank();
+        consoleClear();
+    }
 
     bool loadSuccess = false;
 
-    if (count > 0 && selectedPath[0] != '\0') {
-        loadSuccess = loadAndStartVideo(selectedPath);
+    if (sIndexCount > 0) {
+        // Pioche dans le bag en sautant la vidéo courante et l'historique
+        // récent ; jamais plus d'un tour complet du bag pour rester borné
+        // si la bibliothèque est petite et très couverte par l'historique.
+        char selected[FV_MAX_PATH_LEN];
+        selected[0] = '\0';
+        u32 attemptsLeft = sIndexCount;
+        while (attemptsLeft-- > 0) {
+            if (sShuffleBagRemaining == 0)
+                RebuildShuffleBag();
+            u32 idx = sShuffleBag[--sShuffleBagRemaining];
+            const char* candidate = sIndexBuf + sIndexOffset[idx];
+            if (strcasecmp(candidate, sCurPath) == 0) continue;
+            if (IsInHistory(candidate)) continue;
+            strncpy(selected, candidate, FV_MAX_PATH_LEN - 1);
+            selected[FV_MAX_PATH_LEN - 1] = '\0';
+            break;
+        }
+
+        if (selected[0] != '\0')
+            loadSuccess = loadAndStartVideo(selected);
     }
 
-    // SÉCURITÉ DE SECOURS : Si le fichier trouvé échoue à charger, on relance l'ancienne vidéo
+    // SÉCURITÉ DE SECOURS : rien trouvé ou échec du chargement -> relance l'ancienne vidéo
     if (!loadSuccess) {
-        if (count == 0) sHistoryCount = 0; // Vide l'historique s'il est plein
+        if (sIndexCount == 0) sHistoryCount = 0; // vide l'historique s'il est plein
         if (prevPath[0]) loadAndStartVideo(prevPath);
     }
 }
