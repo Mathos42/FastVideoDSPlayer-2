@@ -57,6 +57,16 @@ static bool IsInHistory(const char* path) {
 
 u32 GetDebounceTicks();
 
+static void DestroyCurrentPlayer();
+
+// Seed du LCG utilisé par le reservoir sampling en mode ALL. Persistante
+// (au lieu d'être recalculée à chaque appel depuis GetDebounceTicks) pour
+// éviter que deux appels rapprochés (vidéo courte, appuis rapides sur
+// suivant) ne partent d'un état de timer quasi identique et ne retirent
+// des séquences de tirages corrélées.
+static u32 sShuffleSeed = 0;
+static bool sShuffleSeedInit = false;
+
 static const char* GetFileName(const char* path)
 {
     const char* slash = strrchr(path, '/');
@@ -144,6 +154,119 @@ static int sDirDepth[MAX_DIR_STACK];
 static fv_listdir_req_t sListReq ALIGN(32);
 static fv_dir_entry_t sListEntries[256] ALIGN(32);
 
+// Un passage complet du parcours BFS de la carte SD (limité à
+// maxFoldersToScan dossiers et depth < 3, comme avant). Retourne le chemin
+// tiré au sort dans outSelected (vide si aucun trouvé), et remonte le
+// nombre de candidats vus (outCount) ainsi que le nombre de dossiers dont
+// IPC_CMD_LIST_DIR a échoué (outFailedDirs) et le nombre de dossiers
+// tronqués car ils contenaient plus de maxEntries entrées (outTruncatedDirs)
+// - ces deux derniers servent à décider s'il faut retenter le scan plutôt
+// que de rejouer prevPath à la moindre erreur I/O transitoire de la carte.
+static void switchToRandomVideoAllScan(char* outSelected, int* outCount, int* outFailedDirs, int* outTruncatedDirs)
+{
+    outSelected[0] = '\0';
+    int count = 0;
+    int failedDirs = 0;
+    int truncatedDirs = 0;
+
+    int queueHead = 0;
+    int queueTail = 0;
+    strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    sDirDepth[queueTail] = 0;
+    queueTail++;
+
+    if (!sShuffleSeedInit) {
+        sShuffleSeed = GetDebounceTicks() ^ 0x13579BDF;
+        sShuffleSeedInit = true;
+    }
+
+    // LA SÉCURITÉ ULTIME DSi : Limiter le nombre de dossiers scannés à 60 maximum.
+    // Cela garantit que la recherche dure moins d'1 seconde et empêche le watchdog de redémarrer la console.
+    int maxFoldersToScan = 60;
+
+    while (queueHead < queueTail && maxFoldersToScan > 0) {
+
+        maxFoldersToScan--;
+
+        char currentDir[FV_MAX_PATH_LEN];
+        strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
+        currentDir[FV_MAX_PATH_LEN - 1] = '\0';
+        int currentDepth = sDirDepth[queueHead];
+        queueHead++;
+
+        strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
+        sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
+        sListReq.entries = sListEntries;
+        sListReq.maxEntries = 256;
+
+        DC_FlushRange(&sListReq, sizeof(sListReq));
+        DC_FlushRange(sListEntries, sizeof(sListEntries));
+
+        fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
+
+        // Attente asynchrone (Yield) pour nourrir le système
+        while (!fifoCheckValue32(FIFO_USER_02)) {
+            swiWaitForVBlank();
+        }
+
+        u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
+
+        DC_InvalidateRange(&sListReq, sizeof(sListReq));
+        DC_InvalidateRange(sListEntries, sizeof(sListEntries));
+
+        if (!ok) { failedDirs++; continue; }
+        if (sListReq.total > sListReq.count) truncatedDirs++;
+
+        for (u32 i = 0; i < sListReq.count; i++) {
+            const char* dName = sListEntries[i].name;
+
+            // Exclusions des dossiers non pertinents
+            if (dName[0] == '.') continue;
+            if (strcasecmp(dName, "System Volume Information") == 0) continue;
+            if (strcasecmp(dName, "_nds") == 0) continue;
+            if (strcasecmp(dName, "Nintendo 3DS") == 0) continue;
+            if (strcasecmp(dName, "Nintendo DSi") == 0) continue;
+            if (strcasecmp(dName, "TWiLightMenu") == 0) continue;
+            if (strcasecmp(dName, "luma") == 0) continue;
+            if (strcasecmp(dName, "DCIM") == 0) continue;
+
+            char fullPath[FV_MAX_PATH_LEN];
+            int dirLen = strlen(currentDir);
+            int nameLen = strlen(dName);
+
+            if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
+
+            strcpy(fullPath, currentDir);
+            if (dirLen > 0 && fullPath[dirLen - 1] != '/') strcat(fullPath, "/");
+            strcat(fullPath, dName);
+
+            if (sListEntries[i].isDir) {
+                if (queueTail < MAX_DIR_STACK && currentDepth < 3) {
+                    strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
+                    sDirDepth[queueTail] = currentDepth + 1;
+                    queueTail++;
+                }
+            } else {
+                if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
+                    if (strcasecmp(fullPath, sCurPath) == 0) continue;
+                    if (IsInHistory(fullPath)) continue;
+
+                    count++;
+                    sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
+                    if (((sShuffleSeed >> 16) % count) == 0) {
+                        strncpy(outSelected, fullPath, FV_MAX_PATH_LEN - 1);
+                        outSelected[FV_MAX_PATH_LEN - 1] = '\0';
+                    }
+                }
+            }
+        }
+    }
+
+    *outCount = count;
+    *outFailedDirs = failedDirs;
+    *outTruncatedDirs = truncatedDirs;
+}
+
 static void switchToRandomVideoAll()
 {
     // Sauvegarde AVANT loadAndStartVideo(), qui écrase sCurPath dès l'appel
@@ -153,22 +276,16 @@ static void switchToRandomVideoAll()
     strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
     prevPath[FV_MAX_PATH_LEN - 1] = '\0';
 
-    if (sPlayerController)
-    {
-        fv_pausePlayer(&sPlayer);
-        delete sPlayerController;
-        sPlayerController = NULL;
-        fv_destroyPlayer(&sPlayer);
-    }
-    
+    DestroyCurrentPlayer();
+
     // SÉCURITÉ IPC : On vide les anciens messages bloqués pour éviter une désynchronisation
     while (fifoCheckValue32(FIFO_USER_02)) {
         fifoGetValue32(FIFO_USER_02);
     }
-    
+
     // Petite pause pour laisser la SD fermer proprement le fichier vidéo
     for (int i = 0; i < 10; i++) swiWaitForVBlank();
-    
+
     // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
     // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
     // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran "Recherche
@@ -183,113 +300,27 @@ static void switchToRandomVideoAll()
     consoleClear();
     printf("\n\n\n\n    Recherche de videos sur\n    toute la carte SD...\n\n    Veuillez patienter...");
     swiWaitForVBlank();
-    
-    int count = 0;
-    char selectedPath[FV_MAX_PATH_LEN];
-    selectedPath[0] = '\0';
-    
-    // File (FIFO) et non pile : un parcours en largeur (BFS) répartit le
-    // budget de maxFoldersToScan sur les dossiers de premier niveau avant de
-    // plonger dans une sous-arborescence, au lieu de s'enfoncer dans la
-    // dernière branche listée et de ne (presque) jamais revenir aux dossiers
-    // frères. queueHead/queueTail indexent le même tableau sDirStack.
-    int queueHead = 0;
-    int queueTail = 0;
-    strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
-    sDirDepth[queueTail] = 0;
-    queueTail++;
-    
-    u32 seed = GetDebounceTicks() ^ 0x13579BDF;
-    
-    // LA SÉCURITÉ ULTIME DSi : Limiter le nombre de dossiers scannés à 60 maximum.
-    // Cela garantit que la recherche dure moins d'1 seconde et empêche le watchdog de redémarrer la console.
-    int maxFoldersToScan = 60; 
 
-    while (queueHead < queueTail && maxFoldersToScan > 0) {
-        
-        maxFoldersToScan--;
-        
-        char currentDir[FV_MAX_PATH_LEN];
-        strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
-        currentDir[FV_MAX_PATH_LEN - 1] = '\0';
-        int currentDepth = sDirDepth[queueHead];
-        queueHead++;
-        
-        strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
-        sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
-        sListReq.entries = sListEntries;
-        sListReq.maxEntries = 256; 
-        
-        DC_FlushRange(&sListReq, sizeof(sListReq));
-        DC_FlushRange(sListEntries, sizeof(sListEntries));
-        
-        fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
-        
-        // Attente asynchrone (Yield) pour nourrir le système
-        while (!fifoCheckValue32(FIFO_USER_02)) {
-            swiWaitForVBlank(); 
-        }
-        
-        u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
-        
-        DC_InvalidateRange(&sListReq, sizeof(sListReq));
-        DC_InvalidateRange(sListEntries, sizeof(sListEntries));
-        
-        if (!ok) continue;
-        
-        for (u32 i = 0; i < sListReq.count; i++) {
-            const char* dName = sListEntries[i].name;
-            
-            // Exclusions des dossiers non pertinents
-            if (dName[0] == '.') continue;
-            if (strcasecmp(dName, "System Volume Information") == 0) continue;
-            if (strcasecmp(dName, "_nds") == 0) continue;
-            if (strcasecmp(dName, "Nintendo 3DS") == 0) continue;
-            if (strcasecmp(dName, "Nintendo DSi") == 0) continue;
-            if (strcasecmp(dName, "TWiLightMenu") == 0) continue;
-            if (strcasecmp(dName, "luma") == 0) continue;
-            if (strcasecmp(dName, "DCIM") == 0) continue;
-            
-            char fullPath[FV_MAX_PATH_LEN];
-            int dirLen = strlen(currentDir);
-            int nameLen = strlen(dName);
-            
-            if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
-            
-            strcpy(fullPath, currentDir);
-            if (dirLen > 0 && fullPath[dirLen - 1] != '/') strcat(fullPath, "/");
-            strcat(fullPath, dName);
-            
-            if (sListEntries[i].isDir) {
-                if (queueTail < MAX_DIR_STACK && currentDepth < 3) {
-                    strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
-                    sDirDepth[queueTail] = currentDepth + 1;
-                    queueTail++;
-                }
-            } else {
-                if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
-                    if (strcasecmp(fullPath, sCurPath) == 0) continue; 
-                    if (IsInHistory(fullPath)) continue;
-                    
-                    count++;
-                    seed = (1103515245 * seed + 12345);
-                    if (((seed >> 16) % count) == 0) {
-                        strncpy(selectedPath, fullPath, FV_MAX_PATH_LEN - 1);
-                        selectedPath[FV_MAX_PATH_LEN - 1] = '\0';
-                    }
-                }
-            }
-        }
+    char selectedPath[FV_MAX_PATH_LEN];
+    int count = 0, failedDirs = 0, truncatedDirs = 0;
+    switchToRandomVideoAllScan(selectedPath, &count, &failedDirs, &truncatedDirs);
+
+    // Aucun candidat ET au moins un dossier en échec IPC (pas juste "carte
+    // avec peu de vidéos") -> probable glitch I/O transitoire de la carte
+    // SD, on retente une fois plutôt que de rejouer prevPath directement.
+    if (count == 0 && failedDirs > 0) {
+        for (int i = 0; i < 10; i++) swiWaitForVBlank();
+        switchToRandomVideoAllScan(selectedPath, &count, &failedDirs, &truncatedDirs);
     }
-    
+
     consoleClear();
-    
+
     bool loadSuccess = false;
-    
+
     if (count > 0 && selectedPath[0] != '\0') {
         loadSuccess = loadAndStartVideo(selectedPath);
-    } 
-    
+    }
+
     // SÉCURITÉ DE SECOURS : Si le fichier trouvé échoue à charger, on relance l'ancienne vidéo
     if (!loadSuccess) {
         if (count == 0) sHistoryCount = 0; // Vide l'historique s'il est plein
