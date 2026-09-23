@@ -28,7 +28,7 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas (dans les 2 modes, TWiLight Menu++ et autonome).
 - En mode TWiLight Menu++ vu que les dossiers sont limiés à 39 fichiers, j'ai rajouté un mode aléatoire sur tous les dossiers de la carte SD  
 
-ATTENTION ! En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (40 fichiers dans un même répertoire, plus exactement 39 fichiers + le répertoire RETOUR).  
+En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (40 fichiers dans un même répertoire, plus exactement 39 fichiers + l'option RETOUR).  
 En mode autonome mon code limite à 512 fichiers dans un seul et même répertoire.  
 
 ## Contrôles
@@ -80,7 +80,7 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 - The bottom screen remains black between videos and when Y, X, L and R are pressed. Tapping the screen, pausing the video or exiting the video restores the bottom screen (in both modes: TWiLight Menu++ and standalone).
 - In TWiLight Menu++ mode, as folders are limited to 39 files, I’ve added a shuffle mode for all folders on the SD card  
 
-PLEASE NOTE ! That in TWiLight Menu++ mode, the number of files in a directory is limited to the maximum supported by the DS (40 files in a single directory – or, to be precise, 39 files plus the ‘RETURN’ directory).  
+PLEASE NOTE ! That in TWiLight Menu++ mode, the number of files in a directory is limited to the maximum supported by the DS (40 files in a single directory – or, to be precise, 39 files plus the ‘RETURN’ option).  
 In standalone mode, my code limits the number of files in a single directory to 512.  
 
 ## Controls
