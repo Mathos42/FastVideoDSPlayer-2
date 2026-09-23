@@ -453,7 +453,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
     if (!browser.OpenDir(sBrowserDir))
         return 0;
 
-    browser.SetModes(sLoopEnabled, static_cast<RandomMode>(sRandomMode));
+    browser.SetModes(sLoopEnabled, sRandomMode > 0);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
