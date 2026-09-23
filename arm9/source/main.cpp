@@ -14,46 +14,70 @@
 #include "../../common/twlwram.h"
 
 static DTCM_BSS fv_player_t sPlayer;
-
 static PlayerController* sPlayerController;
 
 extern u8 gDldiStub[];
 
-// scratch buffer used to receive the previous/next/random path found by the
-// arm7 (must be writable by the arm7 CPU, so plain main RAM, and cacheline
-// aligned so we can safely invalidate it)
 static char sAdjacentPath[FV_MAX_PATH_LEN] ALIGN(32);
-
-// path of the video currently playing, kept around so we can: show its
-// filename in the on-screen toast, and reload it when "loop" is enabled
 static char sCurPath[FV_MAX_PATH_LEN];
 
 static bool sCanUseWram;
 static bool sLoopEnabled = false;
-static bool sRandomEnabled = false;
 
-// standalone mode: no argv[1] at boot, so the built-in browser is the entry
-// point (and B during playback returns to it instead of quitting)
+// 0: OFF, 1: ON (Dossier), 2: ON ALL (Toute la SD)
+static int sRandomMode = 0; 
+
 static bool sStandalone = false;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
 
-// returns the filename part of a path (after the last '/'), for display
+// Récupération de la variable d'inversion des écrans depuis PlayerController.cpp
+extern bool gScreenSwapped;
+
+// --- GESTION DE L'HISTORIQUE ---
+#define HISTORY_SIZE 20
+static char sHistory[HISTORY_SIZE][FV_MAX_PATH_LEN];
+static int sHistoryCount = 0;
+static int sHistoryIdx = 0;
+
+static void AddToHistory(const char* path) {
+    strncpy(sHistory[sHistoryIdx], path, FV_MAX_PATH_LEN - 1);
+    sHistory[sHistoryIdx][FV_MAX_PATH_LEN - 1] = '\0';
+    sHistoryIdx = (sHistoryIdx + 1) % HISTORY_SIZE;
+    if (sHistoryCount < HISTORY_SIZE) sHistoryCount++;
+}
+
+static bool IsInHistory(const char* path) {
+    for (int i = 0; i < sHistoryCount; i++) {
+        if (strcasecmp(sHistory[i], path) == 0) return true;
+    }
+    return false;
+}
+// --------------------------------
+
+u32 GetDebounceTicks();
+
+static void DestroyCurrentPlayer();
+
+// Seed du LCG utilisé par le reservoir sampling en mode ALL. Persistante
+// (au lieu d'être recalculée à chaque appel depuis GetDebounceTicks) pour
+// éviter que deux appels rapprochés (vidéo courte, appuis rapides sur
+// suivant) ne partent d'un état de timer quasi identique et ne retirent
+// des séquences de tirages corrélées.
+static u32 sShuffleSeed = 0;
+static bool sShuffleSeedInit = false;
+
 static const char* GetFileName(const char* path)
 {
     const char* slash = strrchr(path, '/');
     return slash ? slash + 1 : path;
 }
 
-// shows the filename of the video at sCurPath plus the current loop/random
-// state as a brief on-screen toast
 static void ShowVideoMessage()
 {
     if (!sPlayerController)
         return;
 
-    // strip the ".fv" extension for display (doesn't touch sCurPath itself,
-    // which still needs it to actually reload the file)
     char displayName[64];
     strncpy(displayName, GetFileName(sCurPath), sizeof(displayName) - 1);
     displayName[sizeof(displayName) - 1] = 0;
@@ -62,31 +86,54 @@ static void ShowVideoMessage()
         displayName[len - 3] = 0;
 
     char line2[32];
-    snprintf(line2, sizeof(line2), "ALEA:%s  BOUCLE:%s", sRandomEnabled ? "ON " : "OFF", sLoopEnabled ? "ON" : "OFF");
+    const char* randomStateStr;
+    // "ALL" et non "ON ALL" : les 3 états doivent tenir sur 3 caractères
+    // pour que le pire cas ("ALEA:xxx  BOUCLE:OFF") reste <= MAX_MSG_CHARS
+    // (20, voir PlayerView.h) et ne soit pas tronqué par RenderTextLine.
+    if (sRandomMode == 2) randomStateStr = "ALL";
+    else if (sRandomMode == 1) randomStateStr = "ON ";
+    else randomStateStr = "OFF";
+
+    snprintf(line2, sizeof(line2), "ALEA:%s  BOUCLE:%s", randomStateStr, sLoopEnabled ? "ON" : "OFF");
     sPlayerController->ShowMessage(displayName, line2);
 }
 
-// Loads and starts the video at path. Destroys/replaces the current player
-// and controller as needed. Returns false if the video could not be loaded
-// (in which case there is no active player/controller anymore).
+static char sLoadCandidate[FV_MAX_PATH_LEN]; // buffer static de transit vers fv_initPlayer, voir commentaire ci-dessous
+
 static bool loadAndStartVideo(const char* path)
 {
     if (sPlayerController)
     {
-        fv_pausePlayer(&sPlayer); // stop audio cleanly before tearing down
+        fv_pausePlayer(&sPlayer);
         delete sPlayerController;
         sPlayerController = NULL;
         fv_destroyPlayer(&sPlayer);
     }
 
-    strncpy(sCurPath, path, sizeof(sCurPath) - 1);
-    sCurPath[sizeof(sCurPath) - 1] = 0;
+    // Copie systématique dans un buffer STATIC avant fv_initPlayer : le
+    // chemin est lu côté ARM7 (ouverture du fichier via IPC), qui est
+    // physiquement incapable d'accéder à la pile ARM9 si elle réside en
+    // DTCM (le cas par défaut sur cette toolchain). Si `path` pointe vers
+    // une variable locale de l'appelant (ex: un candidat pioché sur la
+    // pile en mode ALL), passer ce pointeur brut à fv_initPlayer plante -
+    // d'où l'usage de sLoadCandidate plutôt que `path` directement, tout en
+    // laissant sCurPath/l'historique intacts tant que le chargement n'a
+    // pas réellement réussi (sinon un échec les pollue avec un chemin
+    // jamais joué, ce qui fausse les exclusions "vidéo courante"/"déjà vue
+    // récemment" ailleurs dans le fichier - particulièrement sensible en
+    // mode ALL où switchToRandomVideoAll() peut retenter plusieurs fois).
+    strncpy(sLoadCandidate, path, sizeof(sLoadCandidate) - 1);
+    sLoadCandidate[sizeof(sLoadCandidate) - 1] = 0;
 
-    if (!fv_initPlayer(&sPlayer, sCurPath, sCanUseWram))
+    if (!fv_initPlayer(&sPlayer, sLoadCandidate, sCanUseWram))
     {
-        fv_destroyPlayer(&sPlayer); // free whatever fv_initPlayer allocated before failing
-        return false;
+        fv_destroyPlayer(&sPlayer);
+        return false; // Échec du chargement
     }
+
+    strncpy(sCurPath, sLoadCandidate, sizeof(sCurPath) - 1);
+    sCurPath[sizeof(sCurPath) - 1] = 0;
+    AddToHistory(sCurPath);
 
     sPlayerController = new PlayerController(&sPlayer);
     sPlayerController->Initialize();
@@ -94,48 +141,276 @@ static bool loadAndStartVideo(const char* path)
     return true;
 }
 
-// Asks the arm7 for the previous/next ".fv" file (alphabetically) in the
-// same folder as the video currently playing, and switches to it if found.
-// If no other ".fv" file exists, the current video keeps playing.
 static void switchToAdjacentVideo(bool next)
 {
     fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(next ? IPC_CMD_FIND_NEXT_FILE : IPC_CMD_FIND_PREV_FILE,
                                                (u32)sAdjacentPath));
     fifoWaitValue32(FIFO_USER_02);
     u32 found = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
-    if (!found)
-        return; // no other video found next to the current one, keep playing
+    if (!found) return;
 
     DC_InvalidateRange(sAdjacentPath, sizeof(sAdjacentPath));
     loadAndStartVideo(sAdjacentPath);
 }
 
-// Asks the arm7 for a random ".fv" file (other than the current one) in the
-// same folder as the video currently playing, and switches to it if found.
 static void switchToRandomVideo()
 {
     fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_FIND_RANDOM_FILE, (u32)sAdjacentPath));
     fifoWaitValue32(FIFO_USER_02);
     u32 found = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
-    if (!found)
-        return; // no other video found next to the current one, keep playing
+    if (!found) return;
 
     DC_InvalidateRange(sAdjacentPath, sizeof(sAdjacentPath));
     loadAndStartVideo(sAdjacentPath);
+}
+
+#define MAX_DIR_STACK 256
+static char sDirStack[MAX_DIR_STACK][FV_MAX_PATH_LEN];
+static fv_listdir_req_t sListReq ALIGN(32);
+static fv_dir_entry_t sListEntries[256] ALIGN(32);
+
+// Index complet des .fv de la carte SD, construit une seule fois par
+// lancement de l'app (au premier passage en mode ALL), puis gardé en RAM
+// pour toute la session : plus aucun IPC_CMD_LIST_DIR au moment de choisir
+// une vidéo, juste une lecture de tableau. Stockage en chemins concaténés
+// (plutôt qu'un tableau [N][FV_MAX_PATH_LEN] qui gâcherait ~200 octets par
+// entrée en moyenne) pour rester large sans peser sur la RAM ARM9.
+//
+// Capacité dimensionnée pour ~250 vidéos avec une marge confortable, pas
+// pour un maximum théorique : la première version (4096 entrées / 256 Ko)
+// réservait ~288 Ko de .bss en permanence pour une bibliothèque qui n'en
+// utilise qu'une quinzaine de Ko, ce qui est probablement ce qui a fait
+// déborder la RAM disponible au runtime (lancé via TWiLight Menu++, la RAM
+// réellement utilisable est souvent bien inférieure aux 4 Mo nominaux) -
+// le crash juste après l'indexation, au moment où fv_initPlayer() alloue
+// ses propres buffers de décodage, colle avec ce diagnostic.
+#define VIDEO_INDEX_MAX_ENTRIES 600
+#define VIDEO_INDEX_BUF_SIZE    (48 * 1024)
+static char sIndexBuf[VIDEO_INDEX_BUF_SIZE];
+static u32  sIndexOffset[VIDEO_INDEX_MAX_ENTRIES];
+static u32  sIndexCount = 0;
+static u32  sIndexBufUsed = 0;
+static bool sIndexBuilt = false;
+
+// Bag mélangé (Fisher-Yates) sur les indices [0..sIndexCount) : tirage sans
+// remise jusqu'à épuisement, puis remélange - même principe que le shuffle
+// bag déjà utilisé côté ARM7 pour le mode aléatoire par dossier.
+static u32 sShuffleBag[VIDEO_INDEX_MAX_ENTRIES];
+static u32 sShuffleBagRemaining = 0;
+
+static void RebuildShuffleBag()
+{
+    sShuffleBagRemaining = sIndexCount;
+    for (u32 i = 0; i < sIndexCount; i++) sShuffleBag[i] = i;
+    for (u32 i = sIndexCount; i > 1; i--) {
+        sShuffleSeed = (1103515245 * sShuffleSeed + 12345);
+        u32 j = (sShuffleSeed >> 16) % i;
+        u32 tmp = sShuffleBag[i - 1];
+        sShuffleBag[i - 1] = sShuffleBag[j];
+        sShuffleBag[j] = tmp;
+    }
+}
+
+// Parcours BFS exhaustif de la carte (plus de plafond de dossiers ni de
+// profondeur : c'est un scan unique par session, pas un scan par pression
+// de touche comme avant, donc son coût ponctuel est acceptable). Remplit
+// sIndexBuf/sIndexOffset/sIndexCount. Retourne le nombre de dossiers dont
+// IPC_CMD_LIST_DIR a échoué (utilisé pour décider un retry côté appelant).
+static int BuildVideoIndex()
+{
+    sIndexCount = 0;
+    sIndexBufUsed = 0;
+    int failedDirs = 0;
+    int truncatedDirs = 0;
+
+    int queueHead = 0;
+    int queueTail = 0;
+    strncpy(sDirStack[queueTail], isDSiMode() ? "sd:/" : "fat:/", FV_MAX_PATH_LEN - 1);
+    queueTail++;
+
+    while (queueHead < queueTail) {
+        char currentDir[FV_MAX_PATH_LEN];
+        strncpy(currentDir, sDirStack[queueHead], FV_MAX_PATH_LEN - 1);
+        currentDir[FV_MAX_PATH_LEN - 1] = '\0';
+        queueHead++;
+
+        strncpy(sListReq.path, currentDir, FV_MAX_PATH_LEN - 1);
+        sListReq.path[FV_MAX_PATH_LEN - 1] = '\0';
+        sListReq.entries = sListEntries;
+        sListReq.maxEntries = 256;
+
+        DC_FlushRange(&sListReq, sizeof(sListReq));
+        DC_FlushRange(sListEntries, sizeof(sListEntries));
+
+        fifoSendValue32(FIFO_USER_02, IPC_CMD_PACK(IPC_CMD_LIST_DIR, (u32)&sListReq));
+
+        // Attente bloquante : le protocole IPC_CMD_LIST_DIR n'autorise
+        // qu'une seule requête en vol à la fois (sListReq/sListEntries sont
+        // des buffers partagés, la réponse ne porte aucun identifiant de
+        // requête). Un timeout qui abandonnerait puis enverrait la requête
+        // suivante désynchroniserait durablement le protocole : la réponse
+        // tardive de l'ARM7 à la requête abandonnée serait alors lue comme
+        // la réponse d'une requête ultérieure, avec des données de mauvais
+        // dossier dans sListEntries -> crash quasi garanti en aval.
+        while (!fifoCheckValue32(FIFO_USER_02)) {
+            swiWaitForVBlank();
+        }
+
+        u32 ok = fifoGetValue32(FIFO_USER_02) & IPC_CMD_ARG_MASK;
+
+        DC_InvalidateRange(&sListReq, sizeof(sListReq));
+        DC_InvalidateRange(sListEntries, sizeof(sListEntries));
+
+        if (!ok) { failedDirs++; continue; }
+        if (sListReq.total > sListReq.count) truncatedDirs++;
+
+        for (u32 i = 0; i < sListReq.count; i++) {
+            const char* dName = sListEntries[i].name;
+
+            if (dName[0] == '.') continue;
+            if (strcasecmp(dName, "System Volume Information") == 0) continue;
+            if (strcasecmp(dName, "_nds") == 0) continue;
+            if (strcasecmp(dName, "Nintendo 3DS") == 0) continue;
+            if (strcasecmp(dName, "Nintendo DSi") == 0) continue;
+            if (strcasecmp(dName, "TWiLightMenu") == 0) continue;
+            if (strcasecmp(dName, "luma") == 0) continue;
+            if (strcasecmp(dName, "DCIM") == 0) continue;
+
+            char fullPath[FV_MAX_PATH_LEN];
+            int dirLen = strlen(currentDir);
+            int nameLen = strlen(dName);
+
+            if (dirLen + nameLen + 2 >= FV_MAX_PATH_LEN) continue;
+
+            strcpy(fullPath, currentDir);
+            if (dirLen > 0 && fullPath[dirLen - 1] != '/') strcat(fullPath, "/");
+            strcat(fullPath, dName);
+
+            if (sListEntries[i].isDir) {
+                if (queueTail < MAX_DIR_STACK) {
+                    strncpy(sDirStack[queueTail], fullPath, FV_MAX_PATH_LEN - 1);
+                    queueTail++;
+                }
+            } else if (nameLen > 3 && strcasecmp(dName + nameLen - 3, ".fv") == 0) {
+                size_t pathLen = strlen(fullPath);
+                if (sIndexCount < VIDEO_INDEX_MAX_ENTRIES &&
+                    sIndexBufUsed + pathLen + 1 <= VIDEO_INDEX_BUF_SIZE)
+                {
+                    memcpy(sIndexBuf + sIndexBufUsed, fullPath, pathLen + 1);
+                    sIndexOffset[sIndexCount] = sIndexBufUsed;
+                    sIndexBufUsed += (u32)(pathLen + 1);
+                    sIndexCount++;
+                }
+            }
+        }
+    }
+
+    return failedDirs;
+}
+
+static void switchToRandomVideoAll()
+{
+    // Sauvegarde AVANT loadAndStartVideo(), qui écrase sCurPath dès l'appel
+    // (avant même de savoir si le chargement réussit). Sans ça, le filet de
+    // sécurité plus bas rejoue le fichier en échec au lieu de l'ancienne vidéo.
+    char prevPath[FV_MAX_PATH_LEN];
+    strncpy(prevPath, sCurPath, FV_MAX_PATH_LEN - 1);
+    prevPath[FV_MAX_PATH_LEN - 1] = '\0';
+
+    DestroyCurrentPlayer();
+
+    // SÉCURITÉ IPC : On vide les anciens messages bloqués pour éviter une désynchronisation
+    while (fifoCheckValue32(FIFO_USER_02)) {
+        fifoGetValue32(FIFO_USER_02);
+    }
+
+    // Petite pause pour laisser la SD fermer proprement le fichier vidéo
+    for (int i = 0; i < 10; i++) swiWaitForVBlank();
+
+    if (!sShuffleSeedInit) {
+        sShuffleSeed = GetDebounceTicks() ^ 0x13579BDF;
+        sShuffleSeedInit = true;
+    }
+
+    if (!sIndexBuilt) {
+        // Réinitialise la console texte sur l'écran du bas : PlayerView::Initialize()
+        // a repris BG0/BG1/BG2/sprites pour son propre affichage (fond, compteur de
+        // temps, légende...) pendant la lecture. Sans ce nettoyage, l'écran
+        // "Indexation..." s'afficherait par-dessus/mélangé à ces résidus.
+        oamClear(&oamSub, 0, 128);
+        REG_DISPCNT_SUB = MODE_0_2D;
+        consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
+        REG_DISPCNT_SUB = MODE_0_2D | DISPLAY_BG2_ACTIVE;
+
+        consoleClear();
+        printf("\n\n\n\n    Indexation de la carte SD...\n\n    Veuillez patienter...");
+        swiWaitForVBlank();
+
+        int failedDirs = BuildVideoIndex();
+        // Index vide ET au moins un dossier en échec IPC (pas juste "carte
+        // sans .fv") -> probable glitch I/O transitoire, on retente une fois.
+        if (sIndexCount == 0 && failedDirs > 0) {
+            for (int i = 0; i < 10; i++) swiWaitForVBlank();
+            BuildVideoIndex();
+        }
+
+        RebuildShuffleBag();
+        // Construit une seule fois par lancement de l'app : un échec I/O
+        // persistant ou une bibliothèque vide ne redéclenchera pas de
+        // nouvelle tentative avant un redémarrage du logiciel.
+        sIndexBuilt = true;
+
+        consoleClear();
+        printf("\n\n\n\n    %lu videos indexees.", (unsigned long)sIndexCount);
+        swiWaitForVBlank();
+        for (int i = 0; i < 30; i++) swiWaitForVBlank();
+        consoleClear();
+    }
+
+    bool loadSuccess = false;
+
+    if (sIndexCount > 0) {
+        // Pioche dans le bag en sautant la vidéo courante et l'historique
+        // récent, et RETENTE avec un autre candidat si le chargement échoue
+        // (fichier illisible, glitch I/O ponctuel) - sans ce retry, un seul
+        // échec de chargement faisait retomber sur prevPath juste en dessous,
+        // ce qui donnait l'impression que "next" relançait la même vidéo.
+        // Jamais plus d'un tour complet du bag pour rester borné si la
+        // bibliothèque est petite et très couverte par l'historique.
+        u32 attemptsLeft = sIndexCount;
+        while (attemptsLeft-- > 0 && !loadSuccess) {
+            if (sShuffleBagRemaining == 0)
+                RebuildShuffleBag();
+            u32 idx = sShuffleBag[--sShuffleBagRemaining];
+            const char* candidate = sIndexBuf + sIndexOffset[idx];
+            if (strcasecmp(candidate, sCurPath) == 0) continue;
+            if (IsInHistory(candidate)) continue;
+
+            char selected[FV_MAX_PATH_LEN];
+            strncpy(selected, candidate, FV_MAX_PATH_LEN - 1);
+            selected[FV_MAX_PATH_LEN - 1] = '\0';
+            loadSuccess = loadAndStartVideo(selected);
+        }
+    }
+
+    // SÉCURITÉ DE SECOURS : rien trouvé ou échec du chargement -> relance l'ancienne vidéo
+    if (!loadSuccess) {
+        if (sIndexCount == 0) sHistoryCount = 0; // vide l'historique s'il est plein
+        if (prevPath[0]) loadAndStartVideo(prevPath);
+    }
 }
 
 static void DestroyCurrentPlayer()
 {
     if (sPlayerController)
     {
-        fv_pausePlayer(&sPlayer); // stop audio cleanly (stopAudioClearQueue) before teardown
+        fv_pausePlayer(&sPlayer);
         delete sPlayerController;
         sPlayerController = NULL;
         fv_destroyPlayer(&sPlayer);
     }
 }
 
-// "sd:/a/b" -> "sd:/a", "sd:/a" -> "sd:/", "sd:/" -> "sd:/"
 static void GetParentDir(const char* path, char* out, size_t outMax)
 {
     const char* slash = strrchr(path, '/');
@@ -156,7 +431,6 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
         len = outMax - 1;
     memcpy(out, path, len);
     out[len] = 0;
-    // "sd:" -> "sd:/" (device root)
     if (strchr(out, ':') && !strchr(out, '/'))
     {
         if (len + 2 < outMax)
@@ -167,19 +441,19 @@ static void GetParentDir(const char* path, char* out, size_t outMax)
     }
 }
 
-// Runs the built-in browser until the user picks a video (returns 1, path
-// written to outPath and last dir to outDir) or asks to quit (returns 0).
-// selectName, if non-NULL, is the filename the cursor should be positioned
-// on after listing (used when returning from playback).
 static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t outDirMax, const char* selectName)
 {
+    // --- NOUVEAUTÉ : On force les écrans dans le bon sens (vidéo en haut, menu en bas) ---
+    gScreenSwapped = false;
+    lcdMainOnTop();
+    // -----------------------------------------------------------------------------------
+
     PlayerController::RestoreSubScreen();
     BrowserController browser;
     if (!browser.OpenDir(sBrowserDir))
         return 0;
-    // reflect the current loop/random state (set from the player, or left
-    // at false on first launch) instead of the default the constructor set
-    browser.SetModes(sLoopEnabled, sRandomEnabled);
+
+    browser.SetModes(sLoopEnabled, sRandomMode);
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -211,12 +485,12 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
 
             case BrowserController::ACT_TOGGLE_LOOP:
                 sLoopEnabled = !sLoopEnabled;
-                browser.SetModes(sLoopEnabled, sRandomEnabled);
+                browser.SetModes(sLoopEnabled, sRandomMode);
                 break;
 
             case BrowserController::ACT_TOGGLE_RANDOM:
-                sRandomEnabled = !sRandomEnabled;
-                browser.SetModes(sLoopEnabled, sRandomEnabled);
+                sRandomMode = (sRandomMode == 0) ? 1 : 0; 
+                browser.SetModes(sLoopEnabled, sRandomMode);
                 break;
 
             default:
@@ -225,8 +499,6 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
     }
 }
 
-// Runs the player until the user exits. Returns true if the whole app
-// should quit, false if control should go back to the browser.
 static bool RunPlayerLoop(bool canReturnToBrowser)
 {
     bool shouldExit = false;
@@ -238,26 +510,22 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
         switch (action)
         {
             case PlayerController::NAV_ACTION_NEXT:
-                if (sRandomEnabled)
-                    switchToRandomVideo();
-                else
-                    switchToAdjacentVideo(true);
+                if (sRandomMode == 2) switchToRandomVideoAll();
+                else if (sRandomMode == 1) switchToRandomVideo();
+                else switchToAdjacentVideo(true);
                 break;
 
             case PlayerController::NAV_ACTION_PREV:
-                if (sRandomEnabled)
-                    switchToRandomVideo();
-                else
-                    switchToAdjacentVideo(false);
+                if (sRandomMode == 2) switchToRandomVideoAll();
+                else if (sRandomMode == 1) switchToRandomVideo();
+                else switchToAdjacentVideo(false);
                 break;
 
             case PlayerController::NAV_ACTION_VIDEO_ENDED:
-                if (sLoopEnabled)
-                    loadAndStartVideo(sCurPath);
-                else if (sRandomEnabled)
-                    switchToRandomVideo();
-                else
-                    switchToAdjacentVideo(true);
+                if (sLoopEnabled) loadAndStartVideo(sCurPath);
+                else if (sRandomMode == 2) switchToRandomVideoAll();
+                else if (sRandomMode == 1) switchToRandomVideo();
+                else switchToAdjacentVideo(true);
                 break;
 
             case PlayerController::NAV_ACTION_TOGGLE_LOOP:
@@ -266,7 +534,12 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
                 break;
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
-                sRandomEnabled = !sRandomEnabled;
+                if (sStandalone || !isDSiMode()) {
+                    sRandomMode = (sRandomMode == 0) ? 1 : 0;
+                } else {
+                    sRandomMode++;
+                    if (sRandomMode > 2) sRandomMode = 0;
+                }
                 ShowVideoMessage();
                 break;
 
@@ -288,18 +561,6 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
     return !backToBrowser;
 }
 
-// free-running 32-bit tick counter, used as a reliable timing reference for
-// input debouncing (see PlayerController::UpdateKeys()). This CANNOT be
-// based on IRQ_VBLANK/a vblank counter incremented from here: fvPlayer.c's
-// fv_startPlayer() calls its own irqSet(IRQ_VBLANK, ...) every time
-// playback (re)starts or seeks (needed for its own A/V sync), which
-// silently replaces whatever handler main.cpp installs - so a
-// vblank-counter approach freezes the instant the first video starts,
-// making any single-instance debounce state permanently stick after its
-// first use. TIMER0+TIMER1 (cascaded) are not touched anywhere else in
-// this codebase, so they give PlayerController an independent, always-
-// ticking time base regardless of what the FastVideo core does with
-// IRQ_VBLANK.
 static void InitDebounceTimer()
 {
     TIMER0_DATA = 0;
@@ -308,7 +569,6 @@ static void InitDebounceTimer()
     TIMER1_CR = TIMER_CASCADE | TIMER_ENABLE;
 }
 
-// ticks at BUS_CLOCK/1024 (~32728.5 Hz on NDS), i.e. ~30.5us/tick
 u32 GetDebounceTicks()
 {
     return ((u32)TIMER1_DATA << 16) | (u32)TIMER0_DATA;
@@ -319,10 +579,6 @@ int main(int argc, char** argv)
     DC_FlushAll();
 
     mpu_enableVramCache();
-
-    // IRQ_VBLANK itself still needs to be enabled at the CPU level here -
-    // fvPlayer.c relies on it already being on when it installs its own
-    // handler, it never calls irqEnable() itself
     irqEnable(IRQ_VBLANK);
     InitDebounceTimer();
 
@@ -338,7 +594,6 @@ int main(int argc, char** argv)
 
     fifoSetValue32Handler(FIFO_USER_01, NULL, NULL);
 
-    // handshake
     fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_HANDSHAKE, 0));
     fifoWaitValue32(FIFO_USER_01);
     u32 handShake = fifoGetValue32(FIFO_USER_01);
@@ -350,7 +605,6 @@ int main(int argc, char** argv)
 
     if (!isDSiMode())
     {
-        // setup dldi on arm7 if not on dsi
         DC_FlushRange(gDldiStub, 16 * 1024);
         fifoSendValue32(FIFO_USER_01, IPC_CMD_PACK(IPC_CMD_SETUP_DLDI, (u32)gDldiStub));
         fifoWaitValue32(FIFO_USER_01);
@@ -361,7 +615,7 @@ int main(int argc, char** argv)
     vramSetBankH(VRAM_H_SUB_BG);
     vramSetBankI(VRAM_I_SUB_SPRITE);
 
-    consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, /*0, 1*/ 2, 1, false, true);
+    consoleInit(NULL, 2, BgType_Text4bpp, BgSize_T_256x256, 2, 1, false, true);
 
     vramSetBankA(VRAM_A_LCD);
     vramSetBankB(VRAM_B_LCD);
@@ -372,9 +626,6 @@ int main(int argc, char** argv)
     for (int i = 0; i < 3 * 128 * 1024; i += 4)
         *(vu32*)((u32)VRAM_A + i) = 0x80008000;
 
-    // launched with a video path (TWiLight Menu++ etc.): play it directly.
-    // launched without: standalone mode, the built-in browser is the entry
-    // point and B during playback returns to it.
     const char* filePath = NULL;
     if (argc >= 2)
         filePath = argv[1];
@@ -391,7 +642,7 @@ int main(int argc, char** argv)
             if (loadAndStartVideo(filePath))
                 quit = RunPlayerLoop(sStandalone);
             else if (!sStandalone)
-                quit = true; // could not load the (initial) video: nothing to do but wait
+                quit = true; 
             filePath = NULL;
         }
         else
@@ -401,7 +652,6 @@ int main(int argc, char** argv)
                 quit = true;
                 break;
             }
-            // position the cursor on the video that was just playing (if any)
             if (RunBrowser(sBrowserPick, sizeof(sBrowserPick), sBrowserDir, sizeof(sBrowserDir),
                            sCurPath[0] ? GetFileName(sCurPath) : NULL))
                 filePath = sBrowserPick;
@@ -412,7 +662,6 @@ int main(int argc, char** argv)
 
     DestroyCurrentPlayer();
     PlayerController::RestoreSubScreen();
-    // hand control back to the launcher (TWiLight Menu++, nds-bootstrap, ...)
     
     exit(0);
 }

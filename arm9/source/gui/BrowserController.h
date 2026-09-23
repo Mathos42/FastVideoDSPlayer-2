@@ -23,7 +23,7 @@ public:
 
     bool OpenDir(const char* path);
     void SelectEntryByName(const char* name);
-    void SetModes(bool loopEnabled, bool randomEnabled);
+    void SetModes(bool loopEnabled, int randomMode);
     Action Update();
     void GetSelectedPath(char* out, size_t outMax) const;
     const char* GetCurDir() const
@@ -47,5 +47,5 @@ private:
     u32 _topLine;
     bool _dirty;
     bool _loopEnabled;
-    bool _randomEnabled;
+    int _randomMode;
 };

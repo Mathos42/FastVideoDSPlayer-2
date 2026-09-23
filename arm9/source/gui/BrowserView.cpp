@@ -84,7 +84,7 @@ void BrowserView::Initialize()
 }
 
 void BrowserView::Render(const char* dirPath, const fv_dir_entry_t* entries, u32 count, u32 total, u32 cursor,
-                         u32 topLine, bool loopEnabled, bool randomEnabled)
+                         u32 topLine, bool loopEnabled, int randomMode)
 {
     char disp[FV_MAX_PATH_LEN];
 
@@ -117,5 +117,7 @@ void BrowserView::Render(const char* dirPath, const fv_dir_entry_t* entries, u32
     else
         iprintf("%lu entree(s)", (unsigned long)total);
 
+    iprintf("\x1b[22;0H\x1b[36mALEA:%s  BOUCLE:%s\x1b[0m",
+            randomMode == 2 ? "ON ALL" : (randomMode == 1 ? "ON " : "OFF"), loopEnabled ? "ON " : "OFF");
     iprintf("\x1b[23;0H\x1b[36mA:OUVRIR B:RETOUR ST/SE:MODES\x1b[0m");
 }

@@ -12,6 +12,9 @@ extern u32 GetDebounceTicks();
 
 bool PlayerController::sSubScreenOff = false;
 
+// Variable globale pour mémoriser l'inversion des écrans
+bool gScreenSwapped = false;
+
 PlayerController::PlayerController(fv_player_t* player)
     : _inputRepeater(KEY_LEFT | KEY_RIGHT, 12, 3), _player(player), _subScreenState(SUB_SCREEN_STATE_ACTIVE),
       _subScreenStateCounter(0), _subBacklightOff(false), _playing(true), _lastTime(-1), _seekPenDown(false),
@@ -29,7 +32,14 @@ PlayerController::PlayerController(fv_player_t* player)
         REG_MASTER_BRIGHT_SUB = 16 | (2 << 14);
         if (isDSiMode())
         {
-            powerOff(PM_BACKLIGHT_BOTTOM);
+            // On éteint intelligemment l'écran inactif
+            if (gScreenSwapped) {
+                powerOff(PM_BACKLIGHT_TOP);
+                powerOn(PM_BACKLIGHT_BOTTOM); // On sécurise la vidéo
+            } else {
+                powerOff(PM_BACKLIGHT_BOTTOM);
+                powerOn(PM_BACKLIGHT_TOP);
+            }
             _subBacklightOff = true;
         }
     }
@@ -39,8 +49,11 @@ void PlayerController::RestoreSubScreen()
 {
     sSubScreenOff = false;
     REG_MASTER_BRIGHT_SUB = 0;
-    if (isDSiMode())
+    if (isDSiMode()) {
+        // On force le rallumage des deux écrans pour être sûr
         powerOn(PM_BACKLIGHT_BOTTOM);
+        powerOn(PM_BACKLIGHT_TOP);
+    }
 }
 
 void PlayerController::Initialize()
@@ -89,6 +102,16 @@ void PlayerController::UpdateTouch()
 
     touchPosition touch;
     touchRead(&touch);
+
+    // Si on a inversé les écrans, l'écran tactile (en bas physiquement)
+    // affiche la vidéo, et non plus l'interface. On bloque donc les 
+    // clics sur les boutons invisibles et on se contente de réveiller l'écran.
+    if (gScreenSwapped) {
+        if (_inputProvider.Triggered(KEY_TOUCH)) {
+            _pendingNavAction = NAV_ACTION_SHOW_INFO;
+        }
+        return;
+    }
 
     if (_inputProvider.Triggered(KEY_TOUCH))
     {
@@ -163,18 +186,46 @@ void PlayerController::UpdateKeys()
         _lastNavActionVBlank[0] = now;
         return;
     }
+    
     if (!startDebounced && _inputProvider.Triggered(KEY_START))
     {
-        _pendingNavAction = NAV_ACTION_TOGGLE_LOOP;
+        // --- LOGIQUE HAUT + START POUR INVERSER LES ECRANS ---
+        if (_inputProvider.Current(KEY_UP)) 
+        {
+            gScreenSwapped = !gScreenSwapped;
+            if (gScreenSwapped) {
+                lcdMainOnBottom();
+            } else {
+                lcdMainOnTop();
+            }
+            
+            // On réveille l'interface pour ne pas chercher les boutons à l'aveugle
+            _subScreenState = SUB_SCREEN_STATE_ACTIVE;
+            _subScreenStateCounter = 0;
+            sSubScreenOff = false;
+            
+            if (isDSiMode()) {
+                powerOn(PM_BACKLIGHT_BOTTOM);
+                powerOn(PM_BACKLIGHT_TOP);
+                _subBacklightOff = false;
+            }
+        } 
+        else 
+        {
+            _pendingNavAction = NAV_ACTION_TOGGLE_LOOP;
+        }
+        
         _lastNavActionVBlank[1] = now;
         return;
     }
+    
     if (!selectDebounced && _inputProvider.Triggered(KEY_SELECT))
     {
         _pendingNavAction = NAV_ACTION_TOGGLE_RANDOM;
         _lastNavActionVBlank[2] = now;
         return;
     }
+    
     if (!nextDebounced && (_inputProvider.Triggered(KEY_R) || _inputProvider.Triggered(KEY_X)))
     {
         _pendingNavAction = NAV_ACTION_NEXT;
@@ -250,12 +301,27 @@ void PlayerController::UpdateDim()
     {
         if (_subBacklightOff && _subScreenState != SUB_SCREEN_STATE_OFF)
         {
-            powerOn(PM_BACKLIGHT_BOTTOM);
+            // Allumage de l'interface
+            if (gScreenSwapped) {
+                powerOn(PM_BACKLIGHT_TOP);
+            } else {
+                powerOn(PM_BACKLIGHT_BOTTOM);
+            }
+            // Sécurise la vidéo
+            powerOn(gScreenSwapped ? PM_BACKLIGHT_BOTTOM : PM_BACKLIGHT_TOP);
+            
             _subBacklightOff = false;
         }
         else if (!_subBacklightOff && _subScreenState == SUB_SCREEN_STATE_OFF)
         {
-            powerOff(PM_BACKLIGHT_BOTTOM);
+            // Extinction intelligente
+            if (gScreenSwapped) {
+                powerOff(PM_BACKLIGHT_TOP); // L'interface (en haut) s'éteint
+                powerOn(PM_BACKLIGHT_BOTTOM);
+            } else {
+                powerOff(PM_BACKLIGHT_BOTTOM); // L'interface (en bas) s'éteint
+                powerOn(PM_BACKLIGHT_TOP);
+            }
             _subBacklightOff = true;
         }
     }
