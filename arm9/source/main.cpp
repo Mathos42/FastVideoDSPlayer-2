@@ -453,7 +453,7 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
     if (!browser.OpenDir(sBrowserDir))
         return 0;
 
-    browser.SetModes(sLoopEnabled, sRandomMode);
+    browser.SetModes(sLoopEnabled, static_cast<RandomMode>(sRandomMode));
     if (selectName)
         browser.SelectEntryByName(selectName);
 
@@ -481,14 +481,6 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
             case BrowserController::ACT_PARENT:
                 GetParentDir(browser.GetCurDir(), tmp, sizeof(tmp));
                 browser.OpenDir(tmp);
-                break;
-
-            case BrowserController::ACT_TOGGLE_LOOP:
-                // SUPPRESSION : L'action sur START ne modifie plus le mode depuis l'explorateur
-                break;
-
-            case BrowserController::ACT_TOGGLE_RANDOM:
-                // SUPPRESSION : L'action sur SELECT ne modifie plus le mode depuis l'explorateur
                 break;
 
             default:
