@@ -98,6 +98,8 @@ static void ShowVideoMessage()
     sPlayerController->ShowMessage(displayName, line2);
 }
 
+static char sLoadCandidate[FV_MAX_PATH_LEN]; // buffer static de transit vers fv_initPlayer, voir commentaire ci-dessous
+
 static bool loadAndStartVideo(const char* path)
 {
     if (sPlayerController)
@@ -108,19 +110,28 @@ static bool loadAndStartVideo(const char* path)
         fv_destroyPlayer(&sPlayer);
     }
 
-    // sCurPath/l'historique ne sont mis à jour qu'en cas de succès : sinon
-    // un fv_initPlayer en échec pollue sCurPath avec un chemin jamais
-    // réellement joué (et l'ajoute à l'historique), ce qui fausse les
-    // exclusions "vidéo courante"/"déjà vue récemment" ailleurs dans le
-    // fichier - particulièrement sensible en mode ALL où switchToRandomVideoAll()
-    // peut désormais retenter loadAndStartVideo() plusieurs fois d'affilée.
-    if (!fv_initPlayer(&sPlayer, path, sCanUseWram))
+    // Copie systématique dans un buffer STATIC avant fv_initPlayer : le
+    // chemin est lu côté ARM7 (ouverture du fichier via IPC), qui est
+    // physiquement incapable d'accéder à la pile ARM9 si elle réside en
+    // DTCM (le cas par défaut sur cette toolchain). Si `path` pointe vers
+    // une variable locale de l'appelant (ex: un candidat pioché sur la
+    // pile en mode ALL), passer ce pointeur brut à fv_initPlayer plante -
+    // d'où l'usage de sLoadCandidate plutôt que `path` directement, tout en
+    // laissant sCurPath/l'historique intacts tant que le chargement n'a
+    // pas réellement réussi (sinon un échec les pollue avec un chemin
+    // jamais joué, ce qui fausse les exclusions "vidéo courante"/"déjà vue
+    // récemment" ailleurs dans le fichier - particulièrement sensible en
+    // mode ALL où switchToRandomVideoAll() peut retenter plusieurs fois).
+    strncpy(sLoadCandidate, path, sizeof(sLoadCandidate) - 1);
+    sLoadCandidate[sizeof(sLoadCandidate) - 1] = 0;
+
+    if (!fv_initPlayer(&sPlayer, sLoadCandidate, sCanUseWram))
     {
         fv_destroyPlayer(&sPlayer);
         return false; // Échec du chargement
     }
 
-    strncpy(sCurPath, path, sizeof(sCurPath) - 1);
+    strncpy(sCurPath, sLoadCandidate, sizeof(sCurPath) - 1);
     sCurPath[sizeof(sCurPath) - 1] = 0;
     AddToHistory(sCurPath);
 
@@ -164,8 +175,17 @@ static fv_dir_entry_t sListEntries[256] ALIGN(32);
 // une vidéo, juste une lecture de tableau. Stockage en chemins concaténés
 // (plutôt qu'un tableau [N][FV_MAX_PATH_LEN] qui gâcherait ~200 octets par
 // entrée en moyenne) pour rester large sans peser sur la RAM ARM9.
-#define VIDEO_INDEX_MAX_ENTRIES 4096
-#define VIDEO_INDEX_BUF_SIZE    (256 * 1024)
+//
+// Capacité dimensionnée pour ~250 vidéos avec une marge confortable, pas
+// pour un maximum théorique : la première version (4096 entrées / 256 Ko)
+// réservait ~288 Ko de .bss en permanence pour une bibliothèque qui n'en
+// utilise qu'une quinzaine de Ko, ce qui est probablement ce qui a fait
+// déborder la RAM disponible au runtime (lancé via TWiLight Menu++, la RAM
+// réellement utilisable est souvent bien inférieure aux 4 Mo nominaux) -
+// le crash juste après l'indexation, au moment où fv_initPlayer() alloue
+// ses propres buffers de décodage, colle avec ce diagnostic.
+#define VIDEO_INDEX_MAX_ENTRIES 600
+#define VIDEO_INDEX_BUF_SIZE    (48 * 1024)
 static char sIndexBuf[VIDEO_INDEX_BUF_SIZE];
 static u32  sIndexOffset[VIDEO_INDEX_MAX_ENTRIES];
 static u32  sIndexCount = 0;
