@@ -41,7 +41,7 @@ En mode autonome mon code limite à 512 fichiers dans un seul et même répertoi
 - B - Retour à la liste des vidéos
 - START - Activer/Désactiver la lecture en boucle de la piste
 - SELECT - Activer/Désactiver la lecture aléatoire dans le répertoire en cours ou sur toute la carte SD
-- Croix Haut + START : les 2 écrans s'inversent  
+- Maintenir croix haut et appuyer sur START : les 2 écrans s'inversent  
 
 ### Toucher
 L'écran tactile permet de lancer ou de mettre en pause la vidéo, ainsi que de se déplacer dans la vidéo en appuyant ou en faisant glisser la barre de défilement.
@@ -93,7 +93,7 @@ In standalone mode, my code limits the number of files in a single directory to 
 - B – Return to the video list
 - START - Turn track repeat on/off
 - SELECT - Turn shuffle on/off/all
-- Up Arrow + START: the two screens swap places  
+- Hold down the cross button and press START: the two screens will swap places  
 
 ### Touch
 The touchscreen allows you to play or pause the video, as well as navigate through it by tapping or dragging the scroll bar.
