@@ -484,13 +484,11 @@ static int RunBrowser(char* outPath, size_t outPathMax, char* outDir, size_t out
                 break;
 
             case BrowserController::ACT_TOGGLE_LOOP:
-                sLoopEnabled = !sLoopEnabled;
-                browser.SetModes(sLoopEnabled, sRandomMode);
+                // SUPPRESSION : L'action sur START ne modifie plus le mode depuis l'explorateur
                 break;
 
             case BrowserController::ACT_TOGGLE_RANDOM:
-                sRandomMode = (sRandomMode == 0) ? 1 : 0; 
-                browser.SetModes(sLoopEnabled, sRandomMode);
+                // SUPPRESSION : L'action sur SELECT ne modifie plus le mode depuis l'explorateur
                 break;
 
             default:
@@ -534,7 +532,10 @@ static bool RunPlayerLoop(bool canReturnToBrowser)
                 break;
 
             case PlayerController::NAV_ACTION_TOGGLE_RANDOM:
-                if (sStandalone || !isDSiMode()) {
+                // MODIFICATION : Désormais accessible aussi en version autonome sur DSi/3DS
+                if (!isDSiMode()) {
+                    // Les très vieilles DS "Fat/Lite" restent limitées au mode aléatoire simple
+                    // car le scan de la carte entière demande trop de ressources.
                     sRandomMode = (sRandomMode == 0) ? 1 : 0;
                 } else {
                     sRandomMode++;
