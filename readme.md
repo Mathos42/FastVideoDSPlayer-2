@@ -30,7 +30,8 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Fichier nds rendu autonome, mais continu de fonctionner avec TWiLight Menu++ également
 - Affichage des dossiers, choix de la vidéo à regarder (en mode autonome)
 - Y X L R SELECT et START fonctionnent également en mode autonome
-- L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas.
+- L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas
+- Inversion des écrans pour la lecture vidéo (si par exemple l'écran du haut ne fonctionne plus).
   
 En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (39 fichiers dans un même répertoire).  
 En mode autonome mon code limite à 512 fichiers dans un seul et même répertoire.  
@@ -88,7 +89,8 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 - The nds file is now standalone, but continues to work with TWiLight Menu++ as well
 - Folder display and selection of the video to watch (in standalone mode)
 - Y, X, L, R, SELECT and START also work in standalone mode
-- The bottom screen remains black between videos and when Y, X, L or R are pressed. Tapping the screen, pausing or exiting the video restores the bottom screen.
+- The bottom screen remains black between videos and when Y, X, L or R are pressed. Tapping the screen, pausing or exiting the video restores the bottom screen
+- Swapping the screens for video playback (if, for example, the top screen is no longer working).
 
 PLEASE NOTE ! That in TWiLight Menu++ mode, the number of files in a directory is limited to the maximum supported by the DS (39 files in a single directory).  
 In standalone mode, my code limits the number of files in a single directory to 512.  
