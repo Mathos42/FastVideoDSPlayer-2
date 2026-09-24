@@ -19,14 +19,17 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
 - Prise en charge d'Argv (à utiliser avec TWiLight Menu++ par exemple)
 - Commandes vidéo : lecture/pause, vidéo suivante, précédente, lecture automatique de la vidéo suivante dans le répertoire et recherche par image clé
 - Désactive le rétroéclairage de l'écran inférieur pendant la lecture pour économiser de l'énergie
+  
+> **Ajouts de ma version :**
 - Prise en compte des lettres avec accents dans les noms de répertoires et de fichiers
-- Fonction boucle sur une vidéo et lecture aléatoire du répertoire
+- Fonction boucle sur une vidéo
+- Lecture aléatoire du répertoire en cours
+- Lecture aléatoire global sur tous les dossiers de la carte SD
 - Mise à jour de la librairie FatFS en R0.16
 - Fichier nds rendu autonome, mais continu de fonctionner avec TWiLight Menu++ également.
 - Affichage des dossiers, choix de la vidéo à regarder (en mode autonome).
 - Y X L R SELECT et START fonctionnent également en mode autonome.
-- L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas (dans les 2 modes, TWiLight Menu++ et autonome).
-- Mode aléatoire global sur tous les dossiers de la carte SD en mode TWiLight Menu++ et autonome
+- L'écran du bas reste noir entre les vidéos et lors de l'appui sur Y X L et R. Appuyer sur l'écran, mettre en pause, sortir de la vidéo rétablissent l'écran du bas.
   
 En mode TWiLight Menu++ le nombre de fichiers dans un répertoire est limité à ce que supporte la DS (39 fichiers dans un même répertoire).  
 En mode autonome mon code limite à 512 fichiers dans un seul et même répertoire.  
@@ -36,6 +39,8 @@ En mode autonome mon code limite à 512 fichiers dans un seul et même répertoi
 - A - Lecture/pause
 - Dpad gauche - Passer à l'image clé précédente (maintenir enfoncé pour continuer)
 - Dpad droit - Passer à l'image clé suivante (maintenir enfoncé pour continuer)
+- 
+> **Ajouts de ma version :**
 - L/Y - Vidéo précédente
 - R/X - Vidéo suivante
 - B - Retour à la liste des vidéos
@@ -70,15 +75,18 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 - Loads data from the SD card and decodes audio on the ARM7 processor, whilst the ARM9 processor is fully available for video decoding
 - Support for Argv (for use with TWiLight Menu++, for example)
 - Video controls: play/pause, next video, previous video, auto-play next video in the folder and keyframe search
-- Disables the lower screen’s backlight during playback to save power
-- Handling accented letters in directory and file names
-- Loop function for a video and random playback of the folder
+- Disables the lower screen’s backlight during playback to save power  
+
+> **Additions to my version :**
+- Support for accented letters in folder and file names
+- Video loop function
+- Shuffle playback within the current folder
+- Global shuffle playback across all folders on the SD card
 - FatFS library updated to R0.16
-- The NDS file has been made standalone, but it still works with TWiLight Menu++ as well.
-- Displays folders and allows you to select which video to watch (in standalone mode).
+- The nds file is now standalone, but continues to work with TWiLight Menu++ as well.
+- Folder display and selection of the video to watch (in standalone mode).
 - Y, X, L, R, SELECT and START also work in standalone mode.
-- The bottom screen remains black between videos and when Y, X, L and R are pressed. Tapping the screen, pausing the video or exiting the video restores the bottom screen (in both modes: TWiLight Menu++ and standalone).
-- Global shuffle mode across all folders on the SD card in TWiLight Menu++ and standalone mode  
+- The bottom screen remains black between videos and when Y, X, L or R are pressed. Tapping the screen, pausing or exiting the video restores the bottom screen.
 
 PLEASE NOTE ! That in TWiLight Menu++ mode, the number of files in a directory is limited to the maximum supported by the DS (39 files in a single directory).  
 In standalone mode, my code limits the number of files in a single directory to 512.  
@@ -88,6 +96,8 @@ In standalone mode, my code limits the number of files in a single directory to 
 - A – Play/pause
 - Left D-pad – Skip to previous keyframe (hold down to continue)
 - Right D-pad – Skip to the next keyframe (hold down to continue)
+
+> **Additions to my version :**
 - L/Y – Previous video
 - R/X – Next video
 - B – Return to the video list
