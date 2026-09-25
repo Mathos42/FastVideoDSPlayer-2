@@ -22,7 +22,7 @@ Utilisez [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEn
   
 > **Ajouts de ma version :**
 - Prise en compte des lettres avec accents dans les noms de répertoires et de fichiers
-- Commandes vidéo : vidéo suivante, précédente, enchainement des vidéos dans le répertoire  
+- Commandes vidéo : vidéo suivante, précédente, enchainement des vidéos  
 - Fonction boucle sur une vidéo
 - Lecture aléatoire du répertoire en cours
 - Lecture aléatoire dans tous les dossiers de la carte SD
@@ -81,7 +81,7 @@ Use [FastVideoDS Encoder](https://www.hiraven.com/FastVideoDS/FastVideoDSEncoder
 
 > **Additions to my version :**
 - Support for accented letters in folder and file names
-- Video controls: next video, previous video, play videos in sequence from the folder
+- Video controls: next video, previous video, play videos in sequence
 - Video loop function
 - Shuffle playback within the current folder
 - Random playback from all folders on the SD card
