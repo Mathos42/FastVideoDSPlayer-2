@@ -1024,7 +1024,7 @@ fv_decodePFrameVectors:
             ldrsh r6, [r10, #2] //(x,y-1)
             ldrsh r7, [r10, #6] //(x+1,y-1)
 
-            //interlock
+            mov r8, r5
 
             sub	r8, r5, r6
             sub	r9, r5, r7
