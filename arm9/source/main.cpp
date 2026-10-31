@@ -27,7 +27,7 @@ static bool sLoopEnabled = false;
 // 0: OFF, 1: ON (Dossier), 2: ON ALL (Toute la SD)
 static int sRandomMode = 0; 
 
-static bool sStandalone = true;
+static bool sStandalone = false;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
 
@@ -622,7 +622,7 @@ int main(int argc, char** argv)
     const char* filePath = NULL;
     if (argc >= 2)
         filePath = argv[1];
-    sStandalone = (filePath == NULL);
+    sStandalone = true;
 
     strncpy(sBrowserDir, isDSiMode() ? "sd:/" : "fat:/", sizeof(sBrowserDir) - 1);
     sBrowserDir[sizeof(sBrowserDir) - 1] = 0;
