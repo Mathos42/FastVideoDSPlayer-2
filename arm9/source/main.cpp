@@ -27,7 +27,7 @@ static bool sLoopEnabled = false;
 // 0: OFF, 1: ON (Dossier), 2: ON ALL (Toute la SD)
 static int sRandomMode = 0; 
 
-static bool sStandalone = false;
+static bool sStandalone = true;
 static char sBrowserDir[FV_MAX_PATH_LEN];
 static char sBrowserPick[FV_MAX_PATH_LEN];
 
