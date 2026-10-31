@@ -1,4 +1,4 @@
-.text
+.section .iwram, "ax", %progbits
 .arm
 
 indexTable:
@@ -43,9 +43,6 @@ adpcm_decompress:
     mul r6, r7, r6
     addcc r3, r3, r6, lsr #3
     subcs r3, r3, r6, lsr #3
-    @ mov r6, r3, asr #15
-    @ teq r6, r3, asr #31
-    @ eorne r3, r8, r3, asr #31
     cmp r3, r8
         movgt r3, r8
     cmn r3, r8
