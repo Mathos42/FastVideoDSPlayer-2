@@ -622,7 +622,7 @@ int main(int argc, char** argv)
     const char* filePath = NULL;
     if (argc >= 2)
         filePath = argv[1];
-    sStandalone = true;
+    sStandalone = (filePath == NULL);
 
     strncpy(sBrowserDir, isDSiMode() ? "sd:/" : "fat:/", sizeof(sBrowserDir) - 1);
     sBrowserDir[sizeof(sBrowserDir) - 1] = 0;
