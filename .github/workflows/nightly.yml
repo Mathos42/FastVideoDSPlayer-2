@@ -14,9 +14,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # pinned to a date before libnds v2.0 ("calico"), which removed the
-    # classic FIFO API (fifoSendValue32/FIFO_USER_*) this project relies on
-    container: devkitpro/devkitarm:20240918
+    # Exact legacy SDK used for the compatibility build: devkitARM r65-1,
+    # libnds 1.8.3-1. Keep the classic FIFO API used by this player.
+    container: devkitpro/devkitarm@sha256:a998edf6b06416b5c053edbcd879abfa22b1b88e9cd3f267f5c4ee9fec71a93a
     name: Build with Docker using devkitARM
     steps:
       - name: Checkout repo
